@@ -95,7 +95,23 @@ options:
 '''
 
 EXAMPLE = '''
-
+- name: vROPs ova
+  vcenter_vrops_deploy:
+    vmname: "{{ vrops_vm_name }}"
+    datastore: "{{ vrops_vm_datastore }}"
+    disk_mode: "{{ vrops_vm_disk_mode }}"
+    network: "{{ vrops_vm_network }}"
+    ip_protocol: "{{ vrops_vm_ip_protocol }}"
+    gateway: "{{ vrops_vm_network_gatway }}"
+    dns_server: "{{ vrops_vm_network_dns }}"
+    ip_address: "{{ vrops_vm_network_ip_address }}"
+    netmask: "{{ vrops_vm_network_netmask }}"
+    deployment_size: "{{ vrops_vm_deployment_size }}"
+    enable_ssh: "{{ vrops_vm_enable_ssh }}"
+    state: "{{ global_state }}"
+  register: vrops_deploy
+  tags:
+    - deploy_vrops_ova
 '''
 
 
@@ -142,6 +158,12 @@ class VropsDeploy(object):
         pass
 
     def state_create(self):
+        #deploy ova
+        #wait for power on
+        #wait for api
+        pass
+
+    def wait_for_power(self):
         pass
 
     def wait_for_api(self):
@@ -174,6 +196,7 @@ class VropsDeploy(object):
             state = 'present'
 
         return state
+
 
 def main():
     argument_spec = vmware_argument_spec()
