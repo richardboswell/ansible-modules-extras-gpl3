@@ -154,6 +154,13 @@ class VropsDeploy(object):
         log(msg)
         self.module.fail_json(msg=msg)
 
+    def run_state(self):
+        log("---------------------------")
+        changed = False
+        current_state = self.check_state()
+
+        self.module.exit_json(changed=changed, msg=msg)
+
     def state_delete(self):
         pass
 
@@ -179,12 +186,14 @@ class VropsDeploy(object):
         state = 'absent'
 
         network_state = self.check_network()
+        log("Network State: {}".format(network_state))
 
         if not network_state:
             msg = "Failed to Find Network: {}".format(self._network)
             self._fail(msg)
 
         datastore_state = self.check_datastore()
+        log("Datastore State: {}".format(datastore_state))
 
         if not datastore_state:
             msg = "Failed to find Datastore: {}".format(self._datastore)
@@ -195,6 +204,7 @@ class VropsDeploy(object):
         if self.vm:
             state = 'present'
 
+        log("Current State: {}".format(state))
         return state
 
 
@@ -229,7 +239,8 @@ def main():
     if not IMPORTS:
         module.fail_json(msg="Failed to import modules")
 
-
+    vrops = VropsDeploy(module)
+    vrops.run_state()
 
 
 from ansible.module_utils.basic import *
