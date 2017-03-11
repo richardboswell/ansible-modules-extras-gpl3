@@ -181,7 +181,6 @@ class VropsDeploy(object):
         msg = "STATE CREATE"
 
         ova_deploy = self.deploy_ova()
-        log("OVA Deploy: {} {}".format(ova_deploy, type(ova_deploy)))
 
         if not self.power_state_wait(self.vm):
             msg = "Failed to wait for power on"
@@ -251,8 +250,9 @@ class VropsDeploy(object):
                                                   vi_string])
 
         if ova_tool_result[0] != 0:
-            module.fail_json(msg='Failed to deploy OVA, error message from ovftool is: {}'.format(ova_tool_result[1]))
+            self.module.fail_json(msg='Failed to deploy OVA, error message from ovftool is: {}'.format(ova_tool_result[1]))
 
+        log("OVF Tool Result: {}".format(ova_tool_result[0]))
         return ova_tool_result[0]
 
     def power_state_wait(vm, sleep_time=15):
