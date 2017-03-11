@@ -236,7 +236,7 @@ class VropsDeploy(object):
                                                   '--X:enableHiddenProperties',
                                                   '--powerOn',
                                                   '--diskMode={}'.format(self.module.params['disk_mode']),
-                                                  '--datastore={}'.format(self.datacenter_name),
+                                                  '--datastore={}'.format(self.datastore_name),
                                                   '--network={}'.format(self.network_name),
                                                   '--name={}'.format(self.name),
                                                   '--ipProtocol={}'.format(self.module.params['ip_protocol']),
