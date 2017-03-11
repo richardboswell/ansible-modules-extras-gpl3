@@ -146,8 +146,20 @@ def log(message=None):
     LOG.debug(msg)
 
 class VropsDeploy(object):
-    """VropsDeploy"""
+    """Create Read and Delete vrops ova
+    """
     def __init__(self, module):
+        """Connect to vsphere api initialize
+        vsphere object names
+
+        :param module: AnsibleModule
+        :param name: Module Parameter name of vm
+        :param datacenter_name: Module Parameter
+        :param cluster_name: Module Parameter
+        :param datastore_name: Module Parameter
+        :param network_name: Module Parameter
+        :param si: vsphere ServiceInstance
+        """
         super(VropsDeploy, self).__init__()
         self.module          = module
         self.si              = connect_to_api(module)
@@ -159,17 +171,22 @@ class VropsDeploy(object):
         self.vm              = None
 
     def _fail(self, msg=None):
+        """Fail from AnsibleModule
+        :param msg: defaults to None
+        """
         if not msg: msg = "General Error occured"
         log(msg)
         self.module.fail_json(msg=msg)
 
     def state_exit_unchanged(self):
+        """Returns changed result and msg"""
         changed = False
         result = None
         msg = "EXIT UNCHANGED"
         return changed, result, msg
 
     def state_delete(self):
+        """Returns changed result msg"""
         changed = False
         result = None
         msg = "STATE DELETE"
@@ -188,6 +205,7 @@ class VropsDeploy(object):
         return changed, result, msg
 
     def state_create(self):
+        """Returns changed result and msg"""
         changed = False
         result = None
         msg = "STATE CREATE"
@@ -213,6 +231,7 @@ class VropsDeploy(object):
         return changed, result, msg
 
     def run_state(self):
+        """Exit AnsibleModule after running state"""
         log(" --- --- --- --- --- ")
         changed = False
         result = None
