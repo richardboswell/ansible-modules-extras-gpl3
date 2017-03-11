@@ -333,8 +333,35 @@ class VropsDeploy(object):
             if vm_pool_count == 30:
                 return False
 
-    def wait_for_api(self):
-        return True
+    def check_api(self):
+        url = "https://{}".format(self.module.params['ip_address'])
+        log("url: {}".format(url))
+        header = {'Content-Type': 'application/json'}
+
+        try:
+            resp = requests.get(url=url, verify=False, headers=header)
+        except requests.exceptions.ConnectionError:
+            return False
+
+        log("Status code: {}".format(resp.status_code))
+        return resp.status_code
+
+    def wait_for_api(self, sleep_time=15):
+        status_poll_count = 0
+        while status_poll_count < 30:
+            api_status = check_api()
+            if api_status:
+                if api_status == 200:
+                    return True
+                else:
+                    status_poll_count += 1
+                    time.sleep(sleep_time)
+            else:
+                status_poll_count += 1
+                time.sleep(sleep_time)
+
+            if status_poll_count == 30:
+                return False
 
     def check_vcenter_objects(self):
         state = False
