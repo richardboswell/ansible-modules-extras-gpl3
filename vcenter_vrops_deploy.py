@@ -183,6 +183,8 @@ class VropsDeploy(object):
         ova_deploy = self.deploy_ova()
         log("Ovftool Result: {}".format(ova_deploy))
 
+        self.vm = self.get_vm(self.name)
+
         if not self.power_state_wait(self.vm):
             msg = "Failed to wait for power on"
             log(msg)
