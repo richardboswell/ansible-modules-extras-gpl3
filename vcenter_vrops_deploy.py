@@ -23,7 +23,7 @@ DOCUMENTATION = '''
 module: vcenter_vrops_deploy
 Short_description: Deploys (creates), Deletes vROPs ova to vcenter cluster
 description:
-    Deploys (creates), Deletes vROPs ova to vcenter cluster. Module will wait for vm to
+    Deploys, Deletes vROPs ova to vcenter cluster. Module will wait for vm to
     power on and "pings" the vROPs api before exiting if not failed.
 requirements:
     - pyvmomi 6
@@ -97,19 +97,26 @@ options:
 EXAMPLE = '''
 - name: vROPs ova
   vcenter_vrops_deploy:
-    vmname: "{{ vrops_vm_name }}"
-    datastore: "{{ vrops_vm_datastore }}"
-    disk_mode: "{{ vrops_vm_disk_mode }}"
-    network: "{{ vrops_vm_network }}"
-    ip_protocol: "{{ vrops_vm_ip_protocol }}"
-    gateway: "{{ vrops_vm_network_gatway }}"
-    dns_server: "{{ vrops_vm_network_dns }}"
-    ip_address: "{{ vrops_vm_network_ip_address }}"
-    netmask: "{{ vrops_vm_network_netmask }}"
-    deployment_size: "{{ vrops_vm_deployment_size }}"
-    enable_ssh: "{{ vrops_vm_enable_ssh }}"
+    hostname: "{{ vcenter }}"
+    username: "{{ vcenter_user }}"
+    password: "{{ vcenter_password }}"
+    datacenter: "{{ _vrops_datacenter }}"
+    cluster: "{{ _vrops_cluster }}"
+    vmname: "{{ item.vm_name }}"
+    datastore: "{{ item.vm_datastore }}"
+    disk_mode: "{{ item.vm_disk_mode }}"
+    network: "{{ item.vm_network }}"
+    ip_protocol: "{{ item.vm_ip_protocol }}"
+    gateway: "{{ item.vm_gateway }}"
+    dns_server: "{{ item.vm_dns_server }}"
+    ip_address: "{{ item.vm_ip_address }}"
+    netmask: "{{ item.vm_netmask }}"
+    deployment_size: "{{ item.vm_deployment_size }}"
+    enable_ssh: "{{ item.vm_enable_ssh }}"
     state: "{{ global_state }}"
   register: vrops_deploy
+  with_items:
+    - "{{ vrops_deployments }}"
   tags:
     - deploy_vrops_ova
 '''
@@ -127,7 +134,7 @@ except ImportError:
 
 ## Logging
 LOG = logging.getLogger(__name__)
-handler = logging.FileHandler('/var/log/chaperone/os_neutron_lbaas.log')
+handler = logging.FileHandler('/var/log/chaperone/vcenter_vrops_deploy.log')
 formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
 handler.setFormatter(formatter)
 LOG.addHandler(handler)
@@ -139,67 +146,141 @@ def log(message=None):
     LOG.debug(msg)
 
 class VropsDeploy(object):
-    """docstring for VropsDeploy"""
+    """VropsDeploy"""
     def __init__(self, module):
         super(VropsDeploy, self).__init__()
-        self.module    = module
-        self.si        = connect_to_api(module)
-        self.name      = module.params['vmname']
-        self.datastore = module.params['datastore']
-        self.network   = module.params['network']
-        self.vm        = None
+        self.module          = module
+        self.si              = connect_to_api(module)
+        self.name            = module.params['vmname']
+        self.datacenter_name = module.params['datacenter']
+        self.cluster_name    = module.params['cluster']
+        self.datastore_name  = module.params['datastore']
+        self.network_name    = module.params['network']
+        self.vm              = None
 
     def _fail(self, msg=None):
         if not msg: msg = "General Error occured"
         log(msg)
         self.module.fail_json(msg=msg)
 
-    def run_state(self):
-        log("---------------------------")
+    def state_exit_unchanged(self):
         changed = False
-        current_state = self.check_state()
-
-        self.module.exit_json(changed=changed, msg=msg)
+        result = None
+        msg = "EXIT UNCHANGED"
+        return changed, result, msg
 
     def state_delete(self):
-        pass
+        changed = True
+        result = None
+        msg = "STATE DELETE"
+        return changed, result, msg
 
     def state_create(self):
+        changed = False
+        result = None
+        msg = "STATE CREATE"
         #deploy ova
+        ova_deploy = self.deploy_ova()
+        log("OVA Deploy: {}".format(ova_deploy))
         #wait for power on
         #wait for api
-        pass
+        return changed, result, msg
 
-    def wait_for_power(self):
+    def run_state(self):
+        log(" --- --- --- --- --- ")
+        changed = False
+        result = None
+        msg = None
+
+        desired_state = self.module.params['state']
+        current_state = self.check_state()
+        module_state = (desired_state == current_state)
+
+        if module_state:
+            changed, result, msg = self.state_exit_unchanged()
+
+        if desired_state == 'absent' and current_state == 'present':
+            changed, result, msg = self.state_delete()
+
+        if desired_state == 'present' and current_state == 'absent':
+            changed, result, msg = self.state_create()
+
+        self.module.exit_json(changed=changed, result=result, msg=msg)
+
+    def deploy_ova(self):
+
+        ovftool_exec = '{}/ovftool'.format(self.module.params['ovftool_path'])
+        ova_file = '{}/{}'.format(self.module.params['path_to_ova'], self.module.params['ova_file'])
+        vi_string = 'vi://{}:{}@{}/{}/host/{}/'.format(self.module.params['username'],
+                                                       self.module.params['password'], self.module.params['hostname'],
+                                                       self.datacenter_name, self.cluster_name)
+
+        ova_tool_result = module.run_command([ovftool_exec,
+                                              '--acceptAllEulas',
+                                              '--skipManifestCheck',
+                                              '--powerOn',
+                                              '--noSSLVerify',
+                                              '--allowExtraConfig',
+                                              '--X:enableHiddenProperties',
+                                              '--powerOn',
+                                              '--diskMode={}'.format(self.module.params['disk_mode']),
+                                              '--datastore={}'.format(self.datacenter_name),
+                                              '--network={}'.format(self.network_name),
+                                              '--name={}'.format(self.name),
+                                              '--ipProtocol={}'.format(self.module.params['ip_protocol']),
+                                              '--deploymentOption={}'.format(self.module.params['deployment_size']),
+                                              '--prop:vami.gateway.vRealize_Operations_Manager_Appliance={}'.format(self.module.params['gateway']),
+                                              '--prop:vami.DNS.vRealize_Operations_Manager_Appliance={}'.format(self.module.params['dns_server']),
+                                              '--prop:vami.ip0.vRealize_Operations_Manager_Appliance={}'.format(self.module.params['ip_address']),
+                                              '--prop:vami.netmask0.vRealize_Operations_Manager_Appliance={}'.format(self.module.params['netmask']),
+                                              '--prop:guestinfo.cis.appliance.ssh.enabled={}'.format(self.module.params['enable_ssh']),
+                                              ova_file,
+                                              vi_string])
+
+        if ova_tool_result[0] != 0:
+            module.fail_json(msg='Failed to deploy OVA, error message from ovftool is: {}'.format(ova_tool_result[1]))
+
+        return ova_tool_result[0]
+
+    def wait_for_poweron(self):
         pass
 
     def wait_for_api(self):
         pass
 
-    def check_datastore(self):
-        return True
+    def check_vcenter_objects(self):
+        state = False
 
-    def check_network(self):
+        datacenter = find_datacenter_by_name(self.si, self.datacenter_name)
+
+        if not datacenter:
+            return state
+
+        cluster   = None
+        datastore = None
+
+        try:
+            cluster = [c for c in datacenter.hostFolder.childEntity if c.name == self.cluster_name][0]
+        except IndexError:
+            return state
+
+        try:
+            datastore = [d for d in cluster.datastore if d.name == self.datastore_name][0]
+        except IndexError:
+            return state
+
         return True
 
     def check_state(self):
         state = 'absent'
 
-        network_state = self.check_network()
-        log("Network State: {}".format(network_state))
+        vcenter_dependencies = self.check_vcenter_objects()
 
-        if not network_state:
-            msg = "Failed to Find Network: {}".format(self._network)
+        if not vcenter_dependencies:
+            msg = "Failed to get vcenter object depenedencies"
             self._fail(msg)
 
-        datastore_state = self.check_datastore()
-        log("Datastore State: {}".format(datastore_state))
-
-        if not datastore_state:
-            msg = "Failed to find Datastore: {}".format(self._datastore)
-            self._fail(msg)
-
-        self.vm = find_vm_by_name(self.si, self.vmname)
+        self.vm = find_vm_by_name(self.si, self.name)
 
         if self.vm:
             state = 'present'
@@ -211,30 +292,31 @@ class VropsDeploy(object):
 def main():
     argument_spec = vmware_argument_spec()
 
-    argument_spec.update(
-        dict(
-            vmname=dict(required=True, type='str', default='vrop_manager'),
-            datastore=dict(required=True, type='str'),
-            disk_mode=dict(required=True, type='str', default='thin'),
-            network=dict(required=True, type='str', default='VM Network'),
-            gateway=dict(required=False, type='str'),
-            dns_server=dict(required=False, type='str'),
-            ip_address=dict(required=False, type='str'),
-            netmask=dict(required=False, type='str'),
-            deployment_size=dict(required=True,
-                                 default='small',
-                                 choices=['small', 'medium', 'large',
-                                          'smallrc', 'largerc', 'xsmall']),
-            enable_ssh=dict(required=True, type='bool', default=True),
-            ip_protocol=dict(required=False, type='str'),
-            state=dict(default='present', choices=['present', 'absent']),
-        )
-    )
+    argument_spec.update(dict(vmname=dict(required=True, type='str'),
+                              datacenter=dict(required=False, type='str'),
+                              cluster=dict(required=False, type='str'),
+                              datastore=dict(required=False, type='str'),
+                              disk_mode=dict(type='str', default='thin'),
+                              network=dict(required=True, type='str'),
+                              gateway=dict(required=False, type='str'),
+                              dns_server=dict(required=False, type='str'),
+                              netmask=dict(required=False, type='str'),
+                              ip_address=dict(required=False, type='str'),
+                              enable_ssh=dict(type='bool', default=True),
+                              ip_protocol=dict(type='str', default='IPv4'),
+                              deployment_size=dict(default='small',
+                                                   choices=['small', 'medium', 'large',
+                                                            'smallrc', 'largerc', 'xsmall']),
+                              ovftool_path=dict(required=True, type='str'),
+                              path_to_ova=dict(required=True, type='str'),
+                              ova_file=dict(required=True, type='str'),
+                              state=dict(default='present', choices=['present', 'absent']),))
 
     module = AnsibleModule(argument_spec=argument_spec,
                            supports_check_mode=False,
                            required_together=[['network', 'gateway', 'dns_server',
-                                              'ip_address', 'netmask', 'ip_protocol']])
+                                              'ip_address', 'netmask', 'ip_protocol'],
+                                              ['datacenter', 'datastore', 'cluster'],])
 
     if not IMPORTS:
         module.fail_json(msg="Failed to import modules")
