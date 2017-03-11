@@ -231,19 +231,19 @@ class VropsDeploy(object):
         log("Ova File: {}".format(ova_file))
         log("VI String: {}".format(vi_string))
 
-        params = [self.module.params['disk_mode'],
-                  self.datastore_name,
-                  self.name,
-                  self.module.params['ip_protocol'],
-                  self.module.params['deployment_size'],
-                  self.module.params['gateway'],
-                  self.module.params['dns_server'],
-                  self.module.params['ip_address'],
-                  self.module.params['netmask'],
-                  self.module.params['enable_ssh']]
+        params = {'disk_mode': self.module.params['disk_mode'],
+                  'datastore_name': self.datastore_name,
+                  'name': self.name,
+                  'ip_protocol': self.module.params['ip_protocol'],
+                  'deployment_size': self.module.params['deployment_size'],
+                  'gateway': self.module.params['gateway'],
+                  'dns_server': self.module.params['dns_server'],
+                  'ip_address': self.module.params['ip_address'],
+                  'netmask': self.module.params['netmask'],
+                  'enable_ssh': self.module.params['enable_ssh']}
 
-        for param in params:
-            log("ovftool param --> {}".format(param))
+        for k, v in params.iteritems():
+            log("Ovftool Param - {} --> {}".format(k,v))
 ###
         self.module.exit_json(changed=False, msg="Ovf tool param check")
 ###
