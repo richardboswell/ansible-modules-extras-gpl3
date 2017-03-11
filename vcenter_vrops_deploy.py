@@ -253,6 +253,7 @@ class VropsDeploy(object):
                                                   '--allowExtraConfig',
                                                   '--X:enableHiddenProperties',
                                                   '--powerOn',
+                                                  '--X:logFile={}'.format('/var/log/chaperone/ovftool_log_vrops.log'),
                                                   '--diskMode={}'.format(self.module.params['disk_mode']),
                                                   '--datastore={}'.format(self.datastore_name),
                                                   '--network={}'.format(self.network_name),
