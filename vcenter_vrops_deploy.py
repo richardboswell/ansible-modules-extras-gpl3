@@ -170,9 +170,21 @@ class VropsDeploy(object):
         return changed, result, msg
 
     def state_delete(self):
-        changed = True
+        changed = False
         result = None
         msg = "STATE DELETE"
+
+        if self.vm.runtime.powerState == 'poweredOn':
+            power_off_task = self.vm.PowerOffVM_Task()
+            wait_for_task(power_off_task)
+
+        try:
+            delete_vm_task = self.vm.Destroy_Task()
+            changed, result = wait_for_task(delete_vm_task)
+        except Exception as e:
+            msg = "Failed to Delete VM: {}".format(str(e))
+            self._fail(msg)
+
         return changed, result, msg
 
     def state_create(self):
@@ -184,6 +196,9 @@ class VropsDeploy(object):
         log("Ovftool Result: {}".format(ova_deploy))
 
         self.vm = self.get_vm(self.name)
+
+        if self.vm:
+            log("VM: {}".format(self.vm.name))
 
         if not self.power_state_wait(self.vm):
             msg = "Failed to wait for power on"
