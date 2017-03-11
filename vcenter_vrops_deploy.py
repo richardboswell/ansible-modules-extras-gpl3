@@ -238,6 +238,8 @@ class VropsDeploy(object):
         msg = None
 
         desired_state = self.module.params['state']
+        log("Desired State: {}".format(desired_state))
+
         current_state = self.check_state()
         module_state = (desired_state == current_state)
 
@@ -253,7 +255,7 @@ class VropsDeploy(object):
         self.module.exit_json(changed=changed, result=result, msg=msg)
 
     def get_vm(self, vm_name):
-        vm = find_vm_by_name(si, vm_name)
+        vm = find_vm_by_name(self.si, vm_name)
         return vm
 
     def deploy_ova(self):
@@ -266,20 +268,6 @@ class VropsDeploy(object):
         log("Ovftool exec: {}".format(ovftool_exec))
         log("Ova File: {}".format(ova_file))
         log("VI String: {}".format(vi_string))
-
-        params = {'disk_mode': self.module.params['disk_mode'],
-                  'datastore_name': self.datastore_name,
-                  'name': self.name,
-                  'ip_protocol': self.module.params['ip_protocol'],
-                  'deployment_size': self.module.params['deployment_size'],
-                  'gateway': self.module.params['gateway'],
-                  'dns_server': self.module.params['dns_server'],
-                  'ip_address': self.module.params['ip_address'],
-                  'netmask': self.module.params['netmask'],
-                  'enable_ssh': self.module.params['enable_ssh']}
-
-        for k, v in params.iteritems():
-            log("Ovftool Param - {} --> {}".format(k,v))
 
         ova_tool_result = self.module.run_command([ovftool_exec,
                                                   '--acceptAllEulas',
@@ -349,7 +337,9 @@ class VropsDeploy(object):
     def wait_for_api(self, sleep_time=15):
         status_poll_count = 0
         while status_poll_count < 30:
-            api_status = check_api()
+            api_status = self.check_api()
+            log("Waiting for api iteration: {}".format(status_poll_count))
+            log("ping api status: {}".format(api_status))
             if api_status:
                 if api_status == 200:
                     return True
