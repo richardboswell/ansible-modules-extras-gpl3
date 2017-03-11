@@ -179,11 +179,20 @@ class VropsDeploy(object):
         changed = False
         result = None
         msg = "STATE CREATE"
-        #deploy ova
+
         ova_deploy = self.deploy_ova()
-        log("OVA Deploy: {}".format(ova_deploy))
-        #wait for power on
-        #wait for api
+        log("OVA Deploy: {} {}".format(ova_deploy, type(ova_deploy)))
+
+        if not self.power_state_wait(self.vm):
+            msg = "Failed to wait for power on"
+            log(msg)
+            return changed, result, msg
+
+        if not self.wait_for_api():
+            msg = "Failed waiting on api"
+            log(msg)
+            return changed, result, msg
+
         return changed, result, msg
 
     def run_state(self):
@@ -206,6 +215,10 @@ class VropsDeploy(object):
             changed, result, msg = self.state_create()
 
         self.module.exit_json(changed=changed, result=result, msg=msg)
+
+    def get_vm(self, vm_name):
+        vm = find_vm_by_name(self.si, vm_name)
+        return vm
 
     def deploy_ova(self):
 
@@ -242,11 +255,26 @@ class VropsDeploy(object):
 
         return ova_tool_result[0]
 
-    def wait_for_poweron(self):
-        pass
+    def power_state_wait(vm, sleep_time=15):
+        vm_pool_count = 0
+        while vm_pool_count < 30:
+            connected = (vm.runtime.connectionState == 'connected')
+            if connected:
+                powered_on = (vm.runtime.powerState == 'poweredOn')
+
+                if powered_on:
+                    return True
+                else:
+                    vm_pool_count += 1
+                    time.sleep(sleep_time)
+            else:
+                vm_pool_count += 1
+                time.sleep(sleep_time)
+            if vm_pool_count == 30:
+                return False
 
     def wait_for_api(self):
-        pass
+        return True
 
     def check_vcenter_objects(self):
         state = False
