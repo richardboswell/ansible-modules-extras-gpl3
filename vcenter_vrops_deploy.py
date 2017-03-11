@@ -181,6 +181,7 @@ class VropsDeploy(object):
         msg = "STATE CREATE"
 
         ova_deploy = self.deploy_ova()
+        log("Ovftool Result: {}".format(ova_deploy))
 
         if not self.power_state_wait(self.vm):
             msg = "Failed to wait for power on"
@@ -226,7 +227,26 @@ class VropsDeploy(object):
         vi_string = 'vi://{}:{}@{}/{}/host/{}/'.format(self.module.params['username'],
                                                        self.module.params['password'], self.module.params['hostname'],
                                                        self.datacenter_name, self.cluster_name)
+        log("Ovftool exec: {}".format(ovftool_exec))
+        log("Ova File: {}".format(ova_file))
+        log("VI String: {}".format(vi_string))
 
+        params = [self.module.params['disk_mode'],
+                  self.datastore_name,
+                  self.name,
+                  self.module.params['ip_protocol'],
+                  self.module.params['deployment_size'],
+                  self.module.params['gateway'],
+                  self.module.params['dns_server'],
+                  self.module.params['ip_address'],
+                  self.module.params['netmask'],
+                  self.module.params['enable_ssh']]
+
+        for param in params:
+            log("ovftool param --> {}".format(param))
+###
+        self.module.exit_json(changed=False, msg="Ovf tool param check")
+###
         ova_tool_result = self.module.run_command([ovftool_exec,
                                                   '--acceptAllEulas',
                                                   '--skipManifestCheck',
