@@ -253,7 +253,7 @@ class VropsDeploy(object):
         self.module.exit_json(changed=changed, result=result, msg=msg)
 
     def get_vm(self, vm_name):
-        vm = find_vm_by_name(self.si, vm_name)
+        vm = find_vm_by_name(si, vm_name)
         return vm
 
     def deploy_ova(self):
@@ -310,7 +310,7 @@ class VropsDeploy(object):
         log("OVF Tool Result: {}".format(ova_tool_result[0]))
         return ova_tool_result[0]
 
-    def power_state_wait(vm, sleep_time=15):
+    def power_state_wait(self, vm, sleep_time=15):
         vm_pool_count = 0
         while vm_pool_count < 30:
             log("Waiting For VM to Power On iteration: {}".format(vm_pool_count))
