@@ -214,9 +214,8 @@ class VropsDeploy(object):
         log("Ovftool Result: {}".format(ova_deploy))
 
         self.vm = self.get_vm(self.name)
-
-        if self.vm:
-            log("VM: {}".format(self.vm.name))
+        result = {'name': self.vm.name,
+                  'moId': self.vm._moId}
 
         if not self.power_state_wait(self.vm):
             msg = "Failed to wait for power on"
@@ -228,7 +227,7 @@ class VropsDeploy(object):
             log(msg)
             return changed, result, msg
 
-        return changed, result, msg
+        return True, result, msg
 
     def run_state(self):
         """Exit AnsibleModule after running state"""
