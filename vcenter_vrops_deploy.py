@@ -244,9 +244,7 @@ class VropsDeploy(object):
 
         for k, v in params.iteritems():
             log("Ovftool Param - {} --> {}".format(k,v))
-###
-        self.module.exit_json(changed=False, msg="Ovf tool param check")
-###
+
         ova_tool_result = self.module.run_command([ovftool_exec,
                                                   '--acceptAllEulas',
                                                   '--skipManifestCheck',
