@@ -276,9 +276,14 @@ class VropsDeploy(object):
     def power_state_wait(vm, sleep_time=15):
         vm_pool_count = 0
         while vm_pool_count < 30:
+            log("Waiting For VM to Power On iteration: {}".format(vm_pool_count))
+
             connected = (vm.runtime.connectionState == 'connected')
+            log("VM connected: {}".format(connected))
+
             if connected:
                 powered_on = (vm.runtime.powerState == 'poweredOn')
+                log("VM Power state: {}".format(powered_on))
 
                 if powered_on:
                     return True
@@ -300,21 +305,27 @@ class VropsDeploy(object):
         datacenter = find_datacenter_by_name(self.si, self.datacenter_name)
 
         if not datacenter:
+            log("Vcenter Object State: {}".format(state))
             return state
+
+        log("Found Datacenter: {}".format(datacenter.name))
 
         cluster   = None
         datastore = None
 
         try:
             cluster = [c for c in datacenter.hostFolder.childEntity if c.name == self.cluster_name][0]
+            log("Found Child Cluster: {}".format(cluster.name))
         except IndexError:
             return state
 
         try:
             datastore = [d for d in cluster.datastore if d.name == self.datastore_name][0]
+            log("Found Child Datastore: {}".format(datastore.name))
         except IndexError:
             return state
 
+        log("Vcenter Object State: {}".format(True))
         return True
 
     def check_state(self):
