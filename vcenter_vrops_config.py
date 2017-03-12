@@ -58,6 +58,13 @@ options:
 
 EXAMPLE = '''
 - name: vROPs Configure
+  vcenter_vrops_config:
+    administrator: 'admin'
+    password: 'pass123!'
+    vrops_ip_addess: '128.123.123.3'
+    state: 'present'
+  tags:
+    - vrops_config
 '''
 
 
@@ -66,7 +73,6 @@ try:
     import requests
     import inspect
     import logging
-    from pyVmomi import vim, vmodl
     IMPORTS = True
 except ImportError:
     IMPORTS = False
@@ -84,6 +90,175 @@ def log(message=None):
     msg="Method: {} Line Number: {} Message: {}".format(func.co_name, func.co_firstlineno, message)
     LOG.debug(msg)
 
+## vrops api paths, cannot find casa api docs... google don't even know?
+_set_admin_path      = 'security/adminpassword/initial'
+_set_admin_role_path = 'deployment/slice/role'
+_token_path          = 'auth/token/acquire'
+
+class VropsRestClient(object):
+    """"""
+    def __init__(self, username, password, server):
+        super(VropsRestClient, self).__init__()
+        self._username       = username
+        self._password       = password
+        self._server         = server
+        self._base_url       = 'https://{}'.format(self._server)
+        self._base_user_url  = 'https://{}/suite-api/api/{}'
+        self._base_admin_url = 'https://{}/casa/{}'
+
+        log("---- VropsRestClient ----")
+        log("username: {}".format(self._username))
+        log("password: {}".format(self._password))
+        log("server: {}".format(self._server))
+        log("base url: {}".format(self._base_url))
+
+    def _do_request(self, **params):
+        """
+        :param url_type: optional: False
+          choices: admin, user, None
+        :param request_type: optional: False
+          choices: get, put, post, delete
+        :param path: optional: True
+          choices: specify casa (admin) or suite-api (user) path
+        :param
+        """
+        resp        = None
+        content     = None
+        status_code = None
+        api_path    = None
+        _url        = self._base_url
+
+        not_optional_params = ['url_type', 'request_type']
+        param_keys = [p for p in params.iterkeys()]
+        params_present = [nop for nop in not_optional_params if nop not in param_keys]
+
+        if params_present:
+            msg = "Requests requires param: {}".format(params_present)
+            log(msg)
+
+        if 'path' in param_keys:
+            api_path = params['path']
+        if params['url_type'] == 'admin':
+            _url = self._base_admin_url.format(self._server, api_path)
+        if params['url_type'] == 'user':
+            _url = self._base_user_url.format(self._server, api_path)
+
+        rheader = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+
+        if 'request_body' in param_keys:
+            log("REQ: {} URL: {} BODY: {}".format(params['request_type'], _url, True))
+            json_body = json.dumps(params['request_body'])
+
+        log("REQ: {} URL: {}".format(params['request_type'], _url))
+
+        try:
+
+            if params['request_type'] == 'get':
+                log("Get Request...")
+                resp = requests.get(_url, verify=False)
+
+            if params['request_type'] == 'post' and params['request_body']:
+                resp = requests.post(_url, headers=rheader, data=json_body, verify=False)
+
+            if params['request_type'] == 'put' and params['request_body']:
+                resp = requests.put(_url, headers=rheader, data=json_body, verify=False)
+
+            if params['request_type'] == 'delete':
+                resp = requests.delete(_url, headers=rheader, verify=False)
+
+        except requests.exceptions.ConnectionError as conn_error:
+            msg = "Failed Request GET with Connection Error: {}".format(str(conn_error))
+            log(msg)
+        except requests.RequestException as e:
+            msg = "Failed Request GET with Error: {}".format(str(e))
+            log(msg)
+
+        if resp.status_code not in params['status_codes']:
+            msg = "Response Status Cod Not in "
+            log(msg)
+            return status_code, content
+
+        try:
+            content = resp.json()
+        except Exception as e:
+            pass
+
+        status_code = resp.status_code
+        log("REQ: {} URL: {} CODE: {}".format(params['request_type'], _url, status_code))
+
+        return status_code, content
+
+    def get_token(self):
+        token_path   = _token_path
+        token_auth   = { 'username': self._username, 'password': self._password }
+        token_params = {'path': token_path, 'url_type': 'user',
+                        'request_type': 'post', 'status_codes': [200],
+                        'request_body': token_auth}
+
+        status, content = self._do_request(**token_params)
+
+        if status != 200:
+            return None
+
+        return content['token']
+
+    def set_admin_password(self):
+        state  = False
+        path   = _set_admin_path
+        body   = { "password": self._password }
+        params = {'path': path, 'url_type': 'admin', 'request_type': 'put',
+                  'status_codes': [200, 500], 'request_body': body}
+
+        status, content = self._do_request(**params)
+
+        if status == 500:
+            state = (content['error_message_key'] == 'security.initial_password_already_set')
+        elif status == 200:
+            state = True
+
+        return state
+
+    def set_admin_role(self):
+        state = False
+        path  = _set_admin_role_path
+
+        body  = [{ "slice_address": self._server,
+                   "admin_slice": self._server,
+                   "is_ha_enabled": 'true',
+                   "user_id": self._username,
+                   "password": self._password,
+                   "slice_roles": ["ADMIN","DATA","UI"] }]
+
+        params = {'path': path, 'url_type': 'admin',
+                  'request_type': 'post', 'status_codes': [202],
+                  'request_body': body}
+
+        status, content = self._do_request(**params)
+
+        if status == 202:
+            state = True
+
+        return state
+
+    def api_test(self):
+        url = self._base_url
+        log("REQ: GET URL: {}".format(url))
+
+        try:
+            resp = requests.get(url=url, verify=False)
+        except requests.exceptions.ConnectionError as ce:
+            log("Failed request ConnectionError: {}".format(ce))
+            return False
+        except requests.RequestException as re:
+            log("Failed request RequestException: {}".format(re))
+            return False
+        except Exception as e:
+            log("Failed request general exception: {}".format(e))
+            return False
+
+        log("REQ: GET URL: {} Status: {}".format(url, resp.status_code))
+        return resp.status_code
+
 class VropsConfig(object):
     """
     """
@@ -91,9 +266,17 @@ class VropsConfig(object):
         """
         """
         super(VropsConfig, self).__init__()
-        self.module     = module
-        self.admin      = module.params['administrator']
-        self.admin_pass = module.params['administrator_password']
+        self.module       = module
+        self.admin        = module.params['administrator']
+        self.admin_pass   = module.params['password']
+        self._server      = module.params['vrops_ip_addess']
+        self.vrops_client = VropsRestClient(self.admin, self.admin_pass, self._server)
+
+        log("--- VropsConfig ---")
+        log("admin: {}".format(self.admin))
+        log("admin_pass: {}".format(self.admin_pass))
+        log("server: {}".format(self._server))
+
 
     def _fail(self, msg=None):
         """Fail from AnsibleModule
@@ -118,12 +301,33 @@ class VropsConfig(object):
 
         return changed, result, msg
 
+    def api_test(self):
+        url = "https://{}".format(self._server)
+        log("REQ: GET URL: {}".format(url))
+
+        try:
+            resp = requests.get(url=url, verify=False)
+        except requests.exceptions.ConnectionError as ce:
+            log("Failed request ConnectionError: {}".format(ce))
+            return False
+        except requests.RequestException as re:
+            log("Failed request RequestException: {}".format(re))
+            return False
+        except Exception as e:
+            log("Failed request general exception: {}".format(e))
+            return False
+
+        log("REQ: GET URL: {} Status: {}".format(url, resp.status_code))
+        return resp.status_code
+
     def state_create(self):
         """Returns changed result and msg"""
         changed = False
         result = None
         msg = "STATE CREATE"
 
+        api_test = self.api_test()
+        
         return changed, result, msg
 
     def run_state(self):
@@ -148,25 +352,16 @@ class VropsConfig(object):
 
         self.module.exit_json(changed=changed, result=result, msg=msg)
 
-    def set_admin_init_password(self):
-        #https://10.159.16.187/casa/security/adminpassword/initial
-        """
-        {
-          "password":""
-        }
-        """
-        pass
-
     def check_state(self):
         state = 'absent'
-
         return state
 
 
 def main():
-    argument_spec = vmware_argument_spec()
-
-    argument_spec.update(dict(state=dict(default='present', choices=['present', 'absent']),))
+    argument_spec = dict(administrator=dict(required=True, type='str'),
+                         password=dict(required=True, type='str'),
+                         vrops_ip_addess=dict(required=True, type='str'),
+                         state=dict(default='present', choices=['present', 'absent']),)
 
     module = AnsibleModule(argument_spec=argument_spec,
                            supports_check_mode=False)
@@ -174,12 +369,15 @@ def main():
     if not IMPORTS:
         module.fail_json(msg="Failed to import modules")
 
+    log("--- Module Params ---")
+    for k, v in module.params.iteritems():
+        log("Param: {} Values: {}".format(k, v))
+
     vrops = VropsConfig(module)
     vrops.run_state()
 
 
 from ansible.module_utils.basic import *
-from ansible.module_utils.vmware import *
 
 if __name__ == '__main__':
     main()

@@ -211,7 +211,6 @@ class VropsDeploy(object):
         msg = "STATE CREATE"
 
         ova_deploy = self.deploy_ova()
-        log("Ovftool Result: {}".format(ova_deploy))
 
         self.vm = self.get_vm(self.name)
         result = {'name': self.vm.name,
@@ -336,9 +335,10 @@ class VropsDeploy(object):
     def wait_for_api(self, sleep_time=15):
         status_poll_count = 0
         while status_poll_count < 30:
-            api_status = self.check_api()
             log("Waiting for api iteration: {}".format(status_poll_count))
-            log("ping api status: {}".format(api_status))
+
+            api_status = self.check_api()
+
             if api_status:
                 if api_status == 200:
                     return True
