@@ -87,13 +87,15 @@ LOG.setLevel(logging.DEBUG)
 
 def log(message=None):
     func = inspect.currentframe().f_back.f_code
-    msg="Method: {} Line Number: {} Message: {}".format(func.co_name, func.co_firstlineno, message)
+    msg="{} Line: {} Msg: {}".format(func.co_name, func.co_firstlineno, message)
     LOG.debug(msg)
 
 ## vrops api paths, cannot find casa api docs... google don't even know?
-_set_admin_path      = 'security/adminpassword/initial'
-_set_admin_role_path = 'deployment/slice/role'
-_token_path          = 'auth/token/acquire'
+_set_admin_init_password_path = 'security/adminpassword/initial'
+_set_admin_role_path          = 'deployment/slice/role'
+_get_admin_role_path          = 'deployment/slice/role/status'
+_token_path                   = 'auth/token/acquire'
+_cluster_deployment           = 'deployment/cluster/info'
 
 class VropsRestClient(object):
     """"""
@@ -106,158 +108,165 @@ class VropsRestClient(object):
         self._base_user_url  = 'https://{}/suite-api/api/{}'
         self._base_admin_url = 'https://{}/casa/{}'
 
-        log("---- VropsRestClient ----")
-        log("username: {}".format(self._username))
-        log("password: {}".format(self._password))
-        log("server: {}".format(self._server))
-        log("base url: {}".format(self._base_url))
-
-    def _do_request(self, **params):
-        """
-        :param url_type: optional: False
-          choices: admin, user, None
-        :param request_type: optional: False
-          choices: get, put, post, delete
-        :param path: optional: True
-          choices: specify casa (admin) or suite-api (user) path
-        :param
-        """
-        resp        = None
-        content     = None
-        status_code = None
-        api_path    = None
-        _url        = self._base_url
-
-        not_optional_params = ['url_type', 'request_type']
-        param_keys = [p for p in params.iterkeys()]
-        params_present = [nop for nop in not_optional_params if nop not in param_keys]
-
-        if params_present:
-            msg = "Requests requires param: {}".format(params_present)
-            log(msg)
-
-        if 'path' in param_keys:
-            api_path = params['path']
-        if params['url_type'] == 'admin':
-            _url = self._base_admin_url.format(self._server, api_path)
-        if params['url_type'] == 'user':
-            _url = self._base_user_url.format(self._server, api_path)
-
-        rheader = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
-
-        if 'request_body' in param_keys:
-            log("REQ: {} URL: {} BODY: {}".format(params['request_type'], _url, True))
-            json_body = json.dumps(params['request_body'])
-
-        log("REQ: {} URL: {}".format(params['request_type'], _url))
+    def do_request(self, request_type, params):
+        resp  = None
+        content = None
+        log("REQ: %s URL: %s" % (request_type, params['url']))
 
         try:
-
-            if params['request_type'] == 'get':
-                log("Get Request...")
-                resp = requests.get(_url, verify=False)
-
-            if params['request_type'] == 'post' and params['request_body']:
-                resp = requests.post(_url, headers=rheader, data=json_body, verify=False)
-
-            if params['request_type'] == 'put' and params['request_body']:
-                resp = requests.put(_url, headers=rheader, data=json_body, verify=False)
-
-            if params['request_type'] == 'delete':
-                resp = requests.delete(_url, headers=rheader, verify=False)
-
-        except requests.exceptions.ConnectionError as conn_error:
-            msg = "Failed Request GET with Connection Error: {}".format(str(conn_error))
+            if request_type == 'get':
+                resp = requests.get(**params)
+            if request_type == 'put':
+                resp = requests.put(**params)
+            if request_type == 'post':
+                resp = requests.post(**params)
+            if request_type == 'delete':
+                resp = requests.delete(**params)
+        except (requests.exceptions.ConnectionError,
+                requests.RequestException) as conn_error:
+            msg = "Failed Request GET Error: {}".format(str(conn_error))
             log(msg)
-        except requests.RequestException as e:
-            msg = "Failed Request GET with Error: {}".format(str(e))
+            return resp, content
+        except Exception as e:
+            msg = "General Failure: {}".format(str(e))
             log(msg)
+            return resp, content
 
-        if resp.status_code not in params['status_codes']:
-            msg = "Response Status Cod Not in "
-            log(msg)
-            return status_code, content
-
+        log("REQ: %s URL: %s STATUS: %s" % (request_type,
+                                            params['url'],
+                                            resp.status_code))
         try:
             content = resp.json()
         except Exception as e:
             pass
 
-        status_code = resp.status_code
-        log("REQ: {} URL: {} CODE: {}".format(params['request_type'], _url, status_code))
+        return resp.status_code, content
 
-        return status_code, content
-
-    def get_token(self):
-        token_path   = _token_path
-        token_auth   = { 'username': self._username, 'password': self._password }
-        token_params = {'path': token_path, 'url_type': 'user',
-                        'request_type': 'post', 'status_codes': [200],
-                        'request_body': token_auth}
-
-        status, content = self._do_request(**token_params)
-
-        if status != 200:
-            return None
-
-        return content['token']
-
-    def set_admin_password(self):
+    def api_state(self):
         state  = False
-        path   = _set_admin_path
-        body   = { "password": self._password }
-        params = {'path': path, 'url_type': 'admin', 'request_type': 'put',
-                  'status_codes': [200, 500], 'request_body': body}
+        params = {'url': self._base_url,
+                  'verify': False}
 
-        status, content = self._do_request(**params)
+        status_code, content = self.do_request('get', params)
 
-        if status == 500:
-            state = (content['error_message_key'] == 'security.initial_password_already_set')
-        elif status == 200:
+        if status_code == 200:
             state = True
 
+        log("API State: %s " % state)
+
+        return state
+
+    def admin_role_state(self):
+        state    = False
+        _url     = self._base_admin_url.format(self._server, _get_admin_role_path)
+        _auth    = (self._username, self._password)
+        _headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+
+        params   = {'url': _url, 'auth': _auth,
+                    'verify': False, 'headers': _headers}
+
+        status_code, content = self.do_request('get', params)
+
+        if status_code == 200:
+            state = content['configurationRunning']
+
+        log("Admin Role State: %s " % state)
+
+        return state
+
+    def body_to_json(self, body):
+        json_body = None
+        try:
+            json_body = json.dumps(body)
+        except Exception as e:
+            msg = "Failed to convert to json: %s " % str(e)
+            log(msg)
+        return json_body
+
+    def set_admin_init_password(self):
+        state    = False
+        _url     = self._base_admin_url.format(self._server, _set_admin_init_password_path)
+        _headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+        body   = { "password": self._password }
+        _body    = self.body_to_json(body)
+
+        params   = {'url': _url, 'verify': False,
+                    'data': _body, 'headers': _headers}
+
+        status_code, content = self.do_request('put', params)
+
+        if status_code == 202:
+            state = True
+        if status_code == 500:
+            state = (content['error_message_key'] != 'security.initial_password_already_set')
+            log("Admin Initial password not set... already been set")
         return state
 
     def set_admin_role(self):
-        state = False
-        path  = _set_admin_role_path
+        state    = False
+        _url     = self._base_admin_url.format(self._server, _set_admin_role_path)
+        _auth    = (self._username, self._password)
+        _headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
 
-        body  = [{ "slice_address": self._server,
-                   "admin_slice": self._server,
-                   "is_ha_enabled": 'true',
-                   "user_id": self._username,
-                   "password": self._password,
-                   "slice_roles": ["ADMIN","DATA","UI"] }]
+        body     = [{ "slice_address": self._server,
+                      "admin_slice": self._server,
+                      "is_ha_enabled": True,
+                      "user_id": self._username,
+                      "password": self._password,
+                      "slice_roles": ["ADMIN","DATA","UI"] }]
 
-        params = {'path': path, 'url_type': 'admin',
-                  'request_type': 'post', 'status_codes': [202],
-                  'request_body': body}
+        _body    = self.body_to_json(body)
 
-        status, content = self._do_request(**params)
+        params   = {'url': _url, 'verify': False, 'auth': _auth,
+                    'data': _body, 'headers': _headers}
 
-        if status == 202:
-            state = True
+        status_code, content = self.do_request('post', params)
+
+    def admin_role(self):
+        set_role = False
+
+        if not self.admin_role_state():
+            set_role = self.set_admin_role()
+
+        return set_role
+
+    def cluster_state(self):
+        state    = False
+        _url     = self._base_admin_url.format(self._server, _cluster_deployment)
+        _auth    = (self._username, self._password)
+        _headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+        params   = {'url': _url, 'verify': False, 'auth': _auth, 'headers': _headers}
+
+        status_code, content = self.do_request('get', params)
+
+        if status_code == 200:
+            state = (content['cluster_name'] == self._server)
 
         return state
 
-    def api_test(self):
-        url = self._base_url
-        log("REQ: GET URL: {}".format(url))
+    def configure_cluster(self):
+        state    = False
+        _url     = self._base_admin_url.format(self._server, _cluster_deployment)
+        _auth    = (self._username, self._password)
+        _headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+        body     = { 'cluster_name': self._server }
+        _body    = self.body_to_json(body)
 
-        try:
-            resp = requests.get(url=url, verify=False)
-        except requests.exceptions.ConnectionError as ce:
-            log("Failed request ConnectionError: {}".format(ce))
-            return False
-        except requests.RequestException as re:
-            log("Failed request RequestException: {}".format(re))
-            return False
-        except Exception as e:
-            log("Failed request general exception: {}".format(e))
-            return False
+        params   = {'url': _url, 'verify': False, 'auth': _auth,
+                    'headers': _headers, 'data': _body}
 
-        log("REQ: GET URL: {} Status: {}".format(url, resp.status_code))
-        return resp.status_code
+        status_code, content = self.do_request('put', params)
+        log("configure cluster content: %s " % content)
+        return state
+
+    def configure_cluster_name(self):
+        state = False
+        if not self.cluster_state():
+            state = self.configure_cluster()
+        return state
+
+    def slice_state(self):
+        
 
 class VropsConfig(object):
     """
@@ -271,12 +280,6 @@ class VropsConfig(object):
         self.admin_pass   = module.params['password']
         self._server      = module.params['vrops_ip_addess']
         self.vrops_client = VropsRestClient(self.admin, self.admin_pass, self._server)
-
-        log("--- VropsConfig ---")
-        log("admin: {}".format(self.admin))
-        log("admin_pass: {}".format(self.admin_pass))
-        log("server: {}".format(self._server))
-
 
     def _fail(self, msg=None):
         """Fail from AnsibleModule
@@ -301,33 +304,24 @@ class VropsConfig(object):
 
         return changed, result, msg
 
-    def api_test(self):
-        url = "https://{}".format(self._server)
-        log("REQ: GET URL: {}".format(url))
-
-        try:
-            resp = requests.get(url=url, verify=False)
-        except requests.exceptions.ConnectionError as ce:
-            log("Failed request ConnectionError: {}".format(ce))
-            return False
-        except requests.RequestException as re:
-            log("Failed request RequestException: {}".format(re))
-            return False
-        except Exception as e:
-            log("Failed request general exception: {}".format(e))
-            return False
-
-        log("REQ: GET URL: {} Status: {}".format(url, resp.status_code))
-        return resp.status_code
-
     def state_create(self):
         """Returns changed result and msg"""
         changed = False
         result = None
         msg = "STATE CREATE"
 
-        api_test = self.api_test()
-        
+        log("Getting API State... ")
+        api_state = self.vrops_client.api_state()
+
+        log("Setting Admin Init Pass... ")
+        admin_password = self.vrops_client.set_admin_init_password()
+
+        log("Setting Admin Role... ")
+        admin_role = self.vrops_client.admin_role()
+
+        log("Setting Cluster Name... ")
+        cluster_name  = self.vrops_client.configure_cluster_name()
+
         return changed, result, msg
 
     def run_state(self):
@@ -368,10 +362,6 @@ def main():
 
     if not IMPORTS:
         module.fail_json(msg="Failed to import modules")
-
-    log("--- Module Params ---")
-    for k, v in module.params.iteritems():
-        log("Param: {} Values: {}".format(k, v))
 
     vrops = VropsConfig(module)
     vrops.run_state()
