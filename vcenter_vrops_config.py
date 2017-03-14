@@ -91,11 +91,31 @@ def log(message=None):
     LOG.debug(msg)
 
 ## vrops api paths, cannot find casa api docs... google don't even know?
-_set_admin_init_password_path = 'security/adminpassword/initial'
-_set_admin_role_path          = 'deployment/slice/role'
-_get_admin_role_path          = 'deployment/slice/role/status'
-_token_path                   = 'auth/token/acquire'
-_cluster_deployment           = 'deployment/cluster/info'
+_security         = 'security/%s'
+_deployment       = 'deployment/%s'
+_sysadmin         = 'sysadmin/%s'
+_cluster          = 'cluster/%s'
+cluster           = 'cluster'
+_node             = 'node/%s'
+node              = 'node'
+_slice            = 'slice/%s'
+slice_            = 'slice'
+_role             = 'role/%s'
+role              = 'role'
+
+ntp               = 'ntp'
+_ntp              = '%s/%s'
+_status           = 'status'
+_ntp_status       = _ntp % (ntp, _status)
+
+adminpassword     = 'adminpassword'
+admin_pass_init   = 'initial'
+admin_pass        = '%s/%s'
+
+_headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+_set_admin_role_body = [{ "slice_address": "", "admin_slice": "",
+                          "is_ha_enabled": True, "user_id": "", "password": "",
+                          "slice_roles": ["ADMIN","DATA","UI"] }]
 
 class VropsRestClient(object):
     """"""
@@ -104,13 +124,22 @@ class VropsRestClient(object):
         self._username       = username
         self._password       = password
         self._server         = server
-        self._base_url       = 'https://{}'.format(self._server)
-        self._base_user_url  = 'https://{}/suite-api/api/{}'
-        self._base_admin_url = 'https://{}/casa/{}'
+        self._base_url       = 'https://%s' % self._server
+        self._base_user_url  = 'https://%s/suite-api/api/%s'
+        self._base_admin_url = 'https://%s/casa/%s'
+        self.auth            = (self._username, self._password)
 
-    def do_request(self, request_type, params):
+    def do_request(self, request_type, status_codes, params):
+        """Returns status code of rest call and json content
+        returns None, None on failure
+        :param request_type: get, put, post, delete
+        :param status_codes: list of accepted status codes
+        :param params: dict of requests.<request_type> accepted parameters
+        """
         resp  = None
         content = None
+        status_code = None
+
         log("REQ: %s URL: %s" % (request_type, params['url']))
 
         try:
@@ -122,19 +151,19 @@ class VropsRestClient(object):
                 resp = requests.post(**params)
             if request_type == 'delete':
                 resp = requests.delete(**params)
-        except (requests.exceptions.ConnectionError,
-                requests.RequestException) as conn_error:
-            msg = "Failed Request GET Error: {}".format(str(conn_error))
-            log(msg)
+            status_code = resp.status_code
+        except (requests.exceptions.ConnectionError, requests.RequestException) as conn_error:
+            log("Failed Request GET Error: %s "% str(conn_error))
+            return resp, content
+        except (status_code not in status_codes):
+            log("Status Code: %s not in status codes: %s " % (status_code, status_codes))
             return resp, content
         except Exception as e:
-            msg = "General Failure: {}".format(str(e))
-            log(msg)
+            log("General Failure: %s " % str(e))
             return resp, content
 
-        log("REQ: %s URL: %s STATUS: %s" % (request_type,
-                                            params['url'],
-                                            resp.status_code))
+        log("REQ: %s URL: %s STATUS: %s" % (request_type, params['url'], status_code))
+
         try:
             content = resp.json()
         except Exception as e:
@@ -142,30 +171,58 @@ class VropsRestClient(object):
 
         return resp.status_code, content
 
+    def api_url(self, url_tpye=None, path=None):
+        url = self._base_url
+        if url_tpye == 'admin' and path:
+            url = self._base_admin_url % (self._server, path)
+        if url_tpye == 'user' and path:
+            url = self._base_user_url % (self._server, path)
+        return url
+
     def api_state(self):
         state  = False
-        params = {'url': self._base_url,
-                  'verify': False}
+        _url   = self.api_url()
+        params = {'url': _url, 'verify': False}
 
-        status_code, content = self.do_request('get', params)
-
-        if status_code == 200:
-            state = True
+        state, content = self.do_request('get', [200], params)
 
         log("API State: %s " % state)
+        return state
+
+    def ntp_state(self, ntp_server):
+        state = False
+        path  = _sysadmin % _cluster % ntp
+        url   = self.api_url('admin', path)
+
+        params = {'url': url, 'auth': self.auth,
+                  'headers': _headers, 'verify': False}
+
+        state, content = self.do_request('get', [200], params)
+
+        if not state:
+            return state
+
+        ### todo compare lists
+        if ntp_server in content['time_server']:
+            state = True
+
+        log("ntp state: %s " % state)
+        return state
+
+    def set_ntp(self, ntp_servers):
+        state = False
 
         return state
 
+
     def admin_role_state(self):
         state    = False
-        _url     = self._base_admin_url.format(self._server, _get_admin_role_path)
-        _auth    = (self._username, self._password)
-        _headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+        _url     = self._base_admin_url % (self._server, _get_admin_role_path)
 
-        params   = {'url': _url, 'auth': _auth,
+        params   = {'url': _url, 'auth': self.auth,
                     'verify': False, 'headers': _headers}
 
-        status_code, content = self.do_request('get', params)
+        status_code, content = self.do_request('get', [200], params)
 
         if status_code == 200:
             state = content['configurationRunning']
@@ -176,51 +233,53 @@ class VropsRestClient(object):
 
     def body_to_json(self, body):
         json_body = None
+
         try:
             json_body = json.dumps(body)
         except Exception as e:
-            msg = "Failed to convert to json: %s " % str(e)
-            log(msg)
+            log("Failed to convert to json: %s " % str(e))
+            return json_body
+
         return json_body
 
     def set_admin_init_password(self):
         state    = False
-        _url     = self._base_admin_url.format(self._server, _set_admin_init_password_path)
-        _headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
-        body   = { "password": self._password }
+        path     = _security % admin_pass % (adminpassword, admin_pass_init)
+        _url     = self.api_url('admin', path)
+        body     = { "password": self._password }
         _body    = self.body_to_json(body)
 
         params   = {'url': _url, 'verify': False,
                     'data': _body, 'headers': _headers}
 
-        status_code, content = self.do_request('put', params)
+        state, content = self.do_request('put', [200, 500], params)
 
-        if status_code == 202:
-            state = True
-        if status_code == 500:
+        if state == 500:
             state = (content['error_message_key'] != 'security.initial_password_already_set')
             log("Admin Initial password not set... already been set")
+
+        log("set admin pass state: %s " % state)
         return state
 
+    def admin_role_body(self, _admin_role_body):
+        for body in _admin_role_body:
+            body.update({'slice_address': self._server})
+            body.update({'admin_slice': self._server})
+            body.update({'user_id': self._username})
+            body.update({'password': self._password})
+        return _admin_role_body
+
     def set_admin_role(self):
-        state    = False
-        _url     = self._base_admin_url.format(self._server, _set_admin_role_path)
-        _auth    = (self._username, self._password)
-        _headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+        state  = False
+        path   = _deployment % _slice % role
+        _url   = self.api_url('admin', path)
+        body   = self.admin_role_body(_set_admin_role_body)
+        _body  = self.body_to_json(body)
 
-        body     = [{ "slice_address": self._server,
-                      "admin_slice": self._server,
-                      "is_ha_enabled": True,
-                      "user_id": self._username,
-                      "password": self._password,
-                      "slice_roles": ["ADMIN","DATA","UI"] }]
+        params = {'url': _url, 'verify': False, 'auth': self.auth,
+                  'data': _body, 'headers': _headers}
 
-        _body    = self.body_to_json(body)
-
-        params   = {'url': _url, 'verify': False, 'auth': _auth,
-                    'data': _body, 'headers': _headers}
-
-        status_code, content = self.do_request('post', params)
+        state, content = self.do_request('post', params)
 
     def admin_role(self):
         set_role = False
@@ -232,10 +291,8 @@ class VropsRestClient(object):
 
     def cluster_state(self):
         state    = False
-        _url     = self._base_admin_url.format(self._server, _cluster_deployment)
-        _auth    = (self._username, self._password)
-        _headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
-        params   = {'url': _url, 'verify': False, 'auth': _auth, 'headers': _headers}
+        _url     = self._base_admin_url % (self._server, _cluster_deployment)
+        params   = {'url': _url, 'verify': False, 'auth': self.auth, 'headers': _headers}
 
         status_code, content = self.do_request('get', params)
 
@@ -246,13 +303,11 @@ class VropsRestClient(object):
 
     def configure_cluster(self):
         state    = False
-        _url     = self._base_admin_url.format(self._server, _cluster_deployment)
-        _auth    = (self._username, self._password)
-        _headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+        _url     = self._base_admin_url % (self._server, _cluster_deployment)
         body     = { 'cluster_name': self._server }
         _body    = self.body_to_json(body)
 
-        params   = {'url': _url, 'verify': False, 'auth': _auth,
+        params   = {'url': _url, 'verify': False, 'auth': self.auth,
                     'headers': _headers, 'data': _body}
 
         status_code, content = self.do_request('put', params)
@@ -265,8 +320,7 @@ class VropsRestClient(object):
             state = self.configure_cluster()
         return state
 
-    def slice_state(self):
-        
+
 
 class VropsConfig(object):
     """
@@ -279,6 +333,7 @@ class VropsConfig(object):
         self.admin        = module.params['administrator']
         self.admin_pass   = module.params['password']
         self._server      = module.params['vrops_ip_addess']
+        self._ntp_server  = '10.159.18.10'
         self.vrops_client = VropsRestClient(self.admin, self.admin_pass, self._server)
 
     def _fail(self, msg=None):
@@ -313,14 +368,26 @@ class VropsConfig(object):
         log("Getting API State... ")
         api_state = self.vrops_client.api_state()
 
+        if not api_state:
+            msg = "API should be ready but is not"
+            log(msg)
+            self._fail(msg)
+
         log("Setting Admin Init Pass... ")
-        admin_password = self.vrops_client.set_admin_init_password()
+        admin_password_state = self.vrops_client.set_admin_init_password()
+
+        log("Getting NTP State....")
+        ntp_state = self.vrops_client.ntp_state(self._ntp_server)
+
+        if not ntp_state:
+            log("Setting NTP...")
+            configure_ntp = self.vrops_client.set_ntp(self._ntp_server)
 
         log("Setting Admin Role... ")
-        admin_role = self.vrops_client.admin_role()
+        #admin_role = self.vrops_client.admin_role()
 
         log("Setting Cluster Name... ")
-        cluster_name  = self.vrops_client.configure_cluster_name()
+        #cluster_name  = self.vrops_client.configure_cluster_name()
 
         return changed, result, msg
 
