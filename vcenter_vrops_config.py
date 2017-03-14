@@ -23,7 +23,7 @@ DOCUMENTATION = '''
 module: vcenter_vrops_config
 Short_description: Configuration for vROPs
 description:
-    Configuration for vROPs
+    Configuration for vROPs. Consumes internal vrops casa api.
 requirements:
     - ansible 2.x
     - requests
@@ -90,7 +90,7 @@ def log(message=None):
     msg="{} Line: {} Msg: {}".format(func.co_name, func.co_firstlineno, message)
     LOG.debug(msg)
 
-## vrops api paths, cannot find casa api docs... google don't even know?
+## vrops api paths
 _security         = 'security/%s'
 _deployment       = 'deployment/%s'
 _sysadmin         = 'sysadmin/%s'
@@ -158,6 +158,9 @@ class VropsRestClient(object):
         except (status_code not in status_codes):
             log("Status Code: %s not in status codes: %s " % (status_code, status_codes))
             return resp, content
+        except status_code == 401:
+            log("REQ: %s URL: %s STATUS: %s UNATHORIZED" % (request_type, params['url'], status_code))
+            return resp, content
         except Exception as e:
             log("General Failure: %s " % str(e))
             return resp, content
@@ -189,48 +192,6 @@ class VropsRestClient(object):
         log("API State: %s " % state)
         return state
 
-    def ntp_state(self, ntp_server):
-        state = False
-        path  = _sysadmin % _cluster % ntp
-        url   = self.api_url('admin', path)
-
-        params = {'url': url, 'auth': self.auth,
-                  'headers': _headers, 'verify': False}
-
-        state, content = self.do_request('get', [200], params)
-
-        if not state:
-            return state
-
-        ### todo compare lists
-        if ntp_server in content['time_server']:
-            state = True
-
-        log("ntp state: %s " % state)
-        return state
-
-    def set_ntp(self, ntp_servers):
-        state = False
-
-        return state
-
-
-    def admin_role_state(self):
-        state    = False
-        _url     = self._base_admin_url % (self._server, _get_admin_role_path)
-
-        params   = {'url': _url, 'auth': self.auth,
-                    'verify': False, 'headers': _headers}
-
-        status_code, content = self.do_request('get', [200], params)
-
-        if status_code == 200:
-            state = content['configurationRunning']
-
-        log("Admin Role State: %s " % state)
-
-        return state
-
     def body_to_json(self, body):
         json_body = None
 
@@ -241,6 +202,80 @@ class VropsRestClient(object):
             return json_body
 
         return json_body
+
+    def _update_ntp_servers(self, ntp_servers, content):
+        """Returns list of desired ntp servers to configure
+        :param ntp_servers: list of desired ntp servers
+        :param content: content from get sysadmin/cluster/ntp
+        """
+        update_list         = []
+        current_ntp_servers = [n['address'] for n in content['time_servers']]
+
+        if set(ntp_servers) == set(current_ntp_servers):
+            return update_list
+
+        common_servers = list(set(ntp_servers) & set(current_ntp_servers))
+        update_list    = [s for s in ntp_servers if s not in common_servers]
+
+        return update_list
+
+    def ntp_state(self, ntp_servers):
+        """Returns bool, list of ntp servers to update
+        :param ntp_servers: list of desired ntp servers
+        """
+        state    = False
+        ntp_list = None
+        path     = _sysadmin % _cluster % ntp
+        url      = self.api_url('admin', path)
+
+        params = {'url': url, 'auth': self.auth,
+                  'headers': _headers, 'verify': False}
+
+        status_code, content = self.do_request('get', [200], params)
+
+        if not content['time_servers']:
+            log("Currently no ntp servers set state: %s " % state)
+            log("ntp_servers: %s " % ntp_servers)
+            return False, ntp_servers
+
+        ntp_list = self._update_ntp_servers(ntp_servers, content)
+
+        if not ntp_list:
+            state = True
+
+        log("ntp state: %s " % state)
+        log("ntp list: %s " % ntp_list)
+        return state, ntp_list
+
+    def ntp_body(self, ntp_servers):
+        body = {'time_servers': []}
+        for ntp in ntp_servers:
+            body['time_servers'].append({'address': ntp})
+        log("ntp body: %s " % body)
+        return body
+
+    def set_ntp(self, ntp_servers):
+        state  = False
+        path   = _sysadmin % _cluster % ntp
+        url    = self.api_url('admin', path)
+        body   = self.ntp_body(ntp_servers)
+        _body  = self.body_to_json(body)
+
+        params = {'url': url, 'auth': self.auth, 'data': _body,
+                  'headers': _headers, 'verify': False}
+
+        state, content = self.do_request('post', [200], params)
+
+        return state
+
+    def configure_ntp(self, ntp_servers):
+        ntp_state, ntp_list = self.ntp_state(ntp_servers)
+
+        if ntp_state:
+            return ntp_state
+
+        set_ntp_servers = self.set_ntp(ntp_list)
+        return set_ntp_servers
 
     def set_admin_init_password(self):
         state    = False
@@ -261,6 +296,22 @@ class VropsRestClient(object):
         log("set admin pass state: %s " % state)
         return state
 
+    def admin_role_state(self):
+        state  = False
+        path   = _deployment % _slice % _role % _status
+        _url   = self._base_admin_url % (self._server, path)
+
+        params = {'url': _url, 'auth': self.auth,
+                  'verify': False, 'headers': _headers}
+
+        status_code, content = self.do_request('get', [200], params)
+
+        if status_code:
+            state = content['configurationRunning']
+
+        log("Admin Role State: %s " % state)
+        return state
+
     def admin_role_body(self, _admin_role_body):
         for body in _admin_role_body:
             body.update({'slice_address': self._server})
@@ -278,8 +329,9 @@ class VropsRestClient(object):
 
         params = {'url': _url, 'verify': False, 'auth': self.auth,
                   'data': _body, 'headers': _headers}
-
-        state, content = self.do_request('post', params)
+                                                #should be 202
+        state, content = self.do_request('post', [209], params)
+        return state
 
     def admin_role(self):
         set_role = False
@@ -333,7 +385,7 @@ class VropsConfig(object):
         self.admin        = module.params['administrator']
         self.admin_pass   = module.params['password']
         self._server      = module.params['vrops_ip_addess']
-        self._ntp_server  = '10.159.18.10'
+        self._ntp_servers = module.params['ntp_servers']
         self.vrops_client = VropsRestClient(self.admin, self.admin_pass, self._server)
 
     def _fail(self, msg=None):
@@ -377,14 +429,10 @@ class VropsConfig(object):
         admin_password_state = self.vrops_client.set_admin_init_password()
 
         log("Getting NTP State....")
-        ntp_state = self.vrops_client.ntp_state(self._ntp_server)
-
-        if not ntp_state:
-            log("Setting NTP...")
-            configure_ntp = self.vrops_client.set_ntp(self._ntp_server)
+        _ntp_state = self.vrops_client.configure_ntp(self._ntp_servers)
 
         log("Setting Admin Role... ")
-        #admin_role = self.vrops_client.admin_role()
+        admin_role = self.vrops_client.admin_role()
 
         log("Setting Cluster Name... ")
         #cluster_name  = self.vrops_client.configure_cluster_name()
@@ -420,8 +468,9 @@ class VropsConfig(object):
 
 def main():
     argument_spec = dict(administrator=dict(required=True, type='str'),
-                         password=dict(required=True, type='str'),
+                         password=dict(required=True, type='str', no_log=True),
                          vrops_ip_addess=dict(required=True, type='str'),
+                         ntp_servers=dict(required=False, type='list'),
                          state=dict(default='present', choices=['present', 'absent']),)
 
     module = AnsibleModule(argument_spec=argument_spec,
