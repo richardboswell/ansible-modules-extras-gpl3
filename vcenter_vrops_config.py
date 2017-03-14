@@ -90,7 +90,7 @@ def log(message=None):
     msg="{} Line: {} Msg: {}".format(func.co_name, func.co_firstlineno, message)
     LOG.debug(msg)
 
-## vrops api paths
+## vrops api paths this needs fixings
 _security         = 'security/%s'
 _deployment       = 'deployment/%s'
 _sysadmin         = 'sysadmin/%s'
@@ -113,7 +113,9 @@ adminpassword     = 'adminpassword'
 admin_pass_init   = 'initial'
 admin_pass        = '%s/%s'
 
-_headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+_headers          = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
+
+# need a better way to read in body for different calls this is static
 _set_admin_role_body = [{ "slice_address": "", "admin_slice": "",
                           "is_ha_enabled": True, "user_id": "", "password": "",
                           "slice_roles": ["ADMIN","DATA","UI"] }]
@@ -150,7 +152,6 @@ class VropsRestClient(object):
         status_code = None
 
         log("REQ: %s URL: %s" % (request_type, params['url']))
-        log("STATUS Codes: %s " % status_codes)
 
         try:
             if request_type == 'get':
@@ -254,15 +255,12 @@ class VropsRestClient(object):
         if not ntp_list:
             state = True
 
-        log("ntp state: %s " % state)
-        log("ntp list: %s " % ntp_list)
         return state, ntp_list
 
     def ntp_body(self, ntp_servers):
         body = {'time_servers': []}
         for ntp in ntp_servers:
             body['time_servers'].append({'address': ntp})
-        log("ntp body: %s " % body)
         return body
 
     def set_ntp(self, ntp_servers):
@@ -271,11 +269,12 @@ class VropsRestClient(object):
         url    = self.api_url('admin', path)
         body   = self.ntp_body(ntp_servers)
         _body  = self.body_to_json(body)
-
+        log("Set NTP Request body: %s " % _body)
         params = {'url': url, 'auth': self.auth, 'data': _body,
                   'headers': _headers, 'verify': False}
 
         state, content = self.do_request('post', [200], params)
+        log("Set NTP content: %s " % content)
 
         return state
 
@@ -294,7 +293,7 @@ class VropsRestClient(object):
         body   = { "old_password": self._password, "password": self._password }
         _body  = self.body_to_json(body)
 
-        params = {'url': _url, 'verify': False, 'auth': self.auth
+        params = {'url': _url, 'verify': False, 'auth': self.auth,
                   'data': _body, 'headers': _headers}
 
         status_code, content = self.do_request('put', [200, 500], params)
@@ -319,7 +318,6 @@ class VropsRestClient(object):
         if status_code == 500:
             state = self.reset_admin_password()
 
-        log("set admin pass state: %s " % state)
         return state
 
     def admin_role_state(self):
@@ -367,38 +365,76 @@ class VropsRestClient(object):
 
         return set_role
 
-    def cluster_state(self):
+    def cluster_state_name(self, cluster_name):
         state    = False
-        _url     = self._base_admin_url % (self._server, _cluster_deployment)
+        path     = _deployment % _cluster % _info
+        _url     = self._base_admin_url % (self._server, path)
         params   = {'url': _url, 'verify': False, 'auth': self.auth, 'headers': _headers}
 
         status_code, content = self.do_request('get', [200], params)
 
         if status_code == 200:
-            state = (content['cluster_name'] == self._server)
+            state = (content['cluster_name'] == cluster_name)
 
         return state
 
-    def configure_cluster(self):
+    def configure_cluster(self, cluster_name):
         state    = False
-        _url     = self._base_admin_url % (self._server, _cluster_deployment)
-        body     = { 'cluster_name': self._server }
+        path     = _deployment % _cluster % _info
+        _url     = self._base_admin_url % (self._server, path)
+        body     = { 'cluster_name': cluster_name }
         _body    = self.body_to_json(body)
 
         params   = {'url': _url, 'verify': False, 'auth': self.auth,
                     'headers': _headers, 'data': _body}
 
-        status_code, content = self.do_request('put', params)
+        status_code, content = self.do_request('put', [200], params)
         log("configure cluster content: %s " % content)
         return state
 
-    def configure_cluster_name(self):
+    def configure_cluster_name(self, cluster_name):
         state = False
-        if not self.cluster_state():
-            state = self.configure_cluster()
+        if not self.cluster_state_name(cluster_name):
+            state = self.configure_cluster(cluster_name)
         return state
 
+    def slice_state_name(self):
+        state  = False
+        path   = _deployment % slice_
+        _url   = self._base_admin_url % (self._server, path)
+        params = {'url': _url, 'verify': False,
+                  'auth': self.auth, 'headers': _headers}
 
+        status_code, content = self.do_request('get', [200], params)
+
+        if content['slice_name'] == self._server:
+            state = True
+
+        return state
+
+    def configure_slice(self):
+        state  = False
+        path   = _deployment % _slice % self._server
+        _url   = self._base_admin_url % (self._server, path)
+        body   = {'slice_name': self._server }
+        _body  = self.body_to_json(body)
+        log("configure slice request body: %s " % _body)
+
+        params = {'url': _url, 'verify': False, 'data': _body,
+                  'auth': self.auth, 'headers': _headers}
+
+        status_code, content = self.do_request('put', [200], params)
+        log("slice configure content: %s " % content)
+
+        state = self.slice_state_name()
+
+        return state
+
+    def configure_slice_name(self):
+        state = False
+        if not self.slice_state_name():
+            state = self.configure_slice()
+        return state
 
 class VropsConfig(object):
     """
@@ -451,18 +487,23 @@ class VropsConfig(object):
             log(msg)
             self._fail(msg)
 
-        log("Setting Admin Init Pass... ")
-        admin_password_state = self.vrops_client.set_admin_init_password()
+        if self.module.params['set_admin_pass']:
+            log("Setting Admin Init Pass... ")
+            admin_password_state = self.vrops_client.set_admin_init_password()
 
-        log("Getting NTP State....")
-        _ntp_state = self.vrops_client.configure_ntp(self._ntp_servers)
+        if 'ntp_servers' in self.module.params:
+            log("Setting NTP Servers....")
+            _ntp_state = self.vrops_client.configure_ntp(self._ntp_servers)
 
         log("Setting Admin Role... ")
         admin_role = self.vrops_client.admin_role()
-        '''
+
         log("Setting Cluster Name... ")
-        #cluster_name  = self.vrops_client.configure_cluster_name()
-        '''
+        cluster_name  = self.vrops_client.configure_cluster_name(self.module.params['cluster_name'])
+
+        log("Setting Slice Name...")
+        slice_name    = self.vrops_client.configure_slice_name()
+
         return changed, result, msg
 
     def run_state(self):
@@ -495,7 +536,9 @@ class VropsConfig(object):
 def main():
     argument_spec = dict(administrator=dict(required=True, type='str'),
                          password=dict(required=True, type='str', no_log=True),
+                         set_admin_pass=dict(required=False, type='bool'),
                          vrops_ip_addess=dict(required=True, type='str'),
+                         cluster_name=dict(required=False, type='str'),
                          ntp_servers=dict(required=False, type='list'),
                          state=dict(default='present', choices=['present', 'absent']),)
 
