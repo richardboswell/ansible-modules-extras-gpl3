@@ -102,6 +102,7 @@ _slice            = 'slice/%s'
 slice_            = 'slice'
 _role             = 'role/%s'
 role              = 'role'
+_info             = 'info'
 
 ntp               = 'ntp'
 _ntp              = '%s/%s'
@@ -116,6 +117,14 @@ _headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' }
 _set_admin_role_body = [{ "slice_address": "", "admin_slice": "",
                           "is_ha_enabled": True, "user_id": "", "password": "",
                           "slice_roles": ["ADMIN","DATA","UI"] }]
+
+class VropsRestClientExceptions(Exception):
+    def __init__(self, msg):
+        self.msg = msg
+    def __str__(self):
+        log(self.msg)
+        return self.msg
+
 
 class VropsRestClient(object):
     """"""
@@ -141,6 +150,7 @@ class VropsRestClient(object):
         status_code = None
 
         log("REQ: %s URL: %s" % (request_type, params['url']))
+        log("STATUS Codes: %s " % status_codes)
 
         try:
             if request_type == 'get':
@@ -153,17 +163,18 @@ class VropsRestClient(object):
                 resp = requests.delete(**params)
             status_code = resp.status_code
         except (requests.exceptions.ConnectionError, requests.RequestException) as conn_error:
-            log("Failed Request GET Error: %s "% str(conn_error))
-            return resp, content
-        except (status_code not in status_codes):
-            log("Status Code: %s not in status codes: %s " % (status_code, status_codes))
-            return resp, content
-        except status_code == 401:
-            log("REQ: %s URL: %s STATUS: %s UNATHORIZED" % (request_type, params['url'], status_code))
-            return resp, content
+            msg = "Failed Request GET Error: %s " % str(conn_error)
+            raise VropsRestClientExceptions(msg=msg)
         except Exception as e:
-            log("General Failure: %s " % str(e))
-            return resp, content
+            msg = "General Failure: %s " % str(e)
+            raise VropsRestClientExceptions(msg=msg)
+
+        if status_code not in status_codes:
+            msg = "Status Code: %s not in status codes: %s " % (status_code, status_codes)
+            raise VropsRestClientExceptions(msg=msg)
+        if status_code == 401:
+            msg = "Status Code: %s UNAUTHORIZED" % status_code
+            raise VropsRestClientExceptions(msg=msg)
 
         log("REQ: %s URL: %s STATUS: %s" % (request_type, params['url'], status_code))
 
@@ -172,7 +183,7 @@ class VropsRestClient(object):
         except Exception as e:
             pass
 
-        return resp.status_code, content
+        return status_code, content
 
     def api_url(self, url_tpye=None, path=None):
         url = self._base_url
@@ -277,6 +288,22 @@ class VropsRestClient(object):
         set_ntp_servers = self.set_ntp(ntp_list)
         return set_ntp_servers
 
+    def reset_admin_password(self):
+        path   = _security % adminpassword
+        _url   = self.api_url('admin', path)
+        body   = { "old_password": self._password, "password": self._password }
+        _body  = self.body_to_json(body)
+
+        params = {'url': _url, 'verify': False, 'auth': self.auth
+                  'data': _body, 'headers': _headers}
+
+        status_code, content = self.do_request('put', [200, 500], params)
+
+        if status_code == 500:
+            raise VropsRestClientExceptions(msg="Failed to reset Admin Password")
+
+        return True
+
     def set_admin_init_password(self):
         state    = False
         path     = _security % admin_pass % (adminpassword, admin_pass_init)
@@ -287,11 +314,10 @@ class VropsRestClient(object):
         params   = {'url': _url, 'verify': False,
                     'data': _body, 'headers': _headers}
 
-        state, content = self.do_request('put', [200, 500], params)
+        status_code, content = self.do_request('put', [200, 500], params)
 
-        if state == 500:
-            state = (content['error_message_key'] != 'security.initial_password_already_set')
-            log("Admin Initial password not set... already been set")
+        if status_code == 500:
+            state = self.reset_admin_password()
 
         log("set admin pass state: %s " % state)
         return state
@@ -329,8 +355,8 @@ class VropsRestClient(object):
 
         params = {'url': _url, 'verify': False, 'auth': self.auth,
                   'data': _body, 'headers': _headers}
-                                                #should be 202
-        state, content = self.do_request('post', [209], params)
+
+        state, content = self.do_request('post', [202], params)
         return state
 
     def admin_role(self):
@@ -346,7 +372,7 @@ class VropsRestClient(object):
         _url     = self._base_admin_url % (self._server, _cluster_deployment)
         params   = {'url': _url, 'verify': False, 'auth': self.auth, 'headers': _headers}
 
-        status_code, content = self.do_request('get', params)
+        status_code, content = self.do_request('get', [200], params)
 
         if status_code == 200:
             state = (content['cluster_name'] == self._server)
@@ -433,10 +459,10 @@ class VropsConfig(object):
 
         log("Setting Admin Role... ")
         admin_role = self.vrops_client.admin_role()
-
+        '''
         log("Setting Cluster Name... ")
         #cluster_name  = self.vrops_client.configure_cluster_name()
-
+        '''
         return changed, result, msg
 
     def run_state(self):
