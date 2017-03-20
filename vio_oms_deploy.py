@@ -32,6 +32,7 @@ Tested on:
     - pyvmomi 6
     - esx 6
     - ansible 2.1.2
+    - VIO 3.0
 options:
     hostname:
         description:
@@ -174,31 +175,75 @@ EXAMPLE = '''
 try:
     import time
     import requests
+    import inspect
+    import logging
     from pyVmomi import vim, vmodl
     IMPORTS = True
 except ImportError:
     IMPORTS = False
 
+LOG = logging.getLogger(__name__)
+handler = logging.FileHandler('/var/log/chaperone/vio_oms_deploy.log')
+formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
+handler.setFormatter(formatter)
+LOG.addHandler(handler)
+LOG.setLevel(logging.DEBUG)
 
-class TaskError(Exception):
-    pass
+def log(message=None):
+    func = inspect.currentframe().f_back.f_code
+    msg = "Method: {} Line Number: {} Message: {}".format(func.co_name, func.co_firstlineno, message)
+    LOG.debug(msg)
 
 vc = {}
 
-def wait_for_vm(vm):
-    while True:
+def check_oms_api(module):
+    url = "https://{}:8443/oms/api/hello".format(module.params['oms_ip'])
+    try:
+        resp = requests.get(url=url, verify=False)
+    except requests.exceptions.ConnectionError:
+        return False
+    return resp.status_code, resp.content
 
-        if vm.runtime.powerState == 'poweredOn' and vm.runtime.connectionState == 'connected':
-            return True
-        if vm.runtime.connectionState in ('inaccessible', 'invalid', 'orphaned') or \
-                vm.rumtime.powerState == 'suspended':
-            try:
-                raise TaskError("VM in Error State")
-            except TaskError as e:
-                return e
+def wait_for_api(module, sleep_time=15):
+    status_poll_count = 0
+    while status_poll_count < 30:
+        log("----- Waiting for API Status -----> {}".format(status_poll_count))
+        api_status = check_oms_api(module)
+        if api_status:
+            if api_status[0] == 200:
+                return True
+            else:
+                status_poll_count += 1
+                time.sleep(sleep_time)
+        else:
+            status_poll_count += 1
+            time.sleep(sleep_time)
 
-        time.sleep(15)
+        if status_poll_count == 30:
+            return False
 
+def wait_for_vm(vm, sleep_time=15):
+    vm_pool_count = 0
+    while vm_pool_count < 30:
+
+        connected = (vm.runtime.connectionState == 'connected')
+        log("Waiting for vm Connected --> {}".format(connected))
+
+        if connected:
+            powered_on = (vm.runtime.powerState == 'poweredOn')
+            log("Waiting for vm Powered On --> {}".format(powered_on))
+
+            if powered_on:
+                return True
+            else:
+                vm_pool_count += 1
+                time.sleep(sleep_time)
+        else:
+            vm_pool_count += 1
+            time.sleep(sleep_time)
+
+        if vm_pool_count == 30:
+            return False
 
 def find_virtual_machine(content, searched_vm_name):
     virtual_machines = get_all_objs(content, [vim.VirtualMachine])
@@ -207,7 +252,6 @@ def find_virtual_machine(content, searched_vm_name):
             return vm
     return None
 
-
 def get_all_objs(content, vimtype):
     obj = {}
     container = content.viewManager.CreateContainerView(content.rootFolder, vimtype, True)
@@ -215,26 +259,29 @@ def get_all_objs(content, vimtype):
         obj.update({managed_object_ref: managed_object_ref.name})
     return obj
 
-
 def find_vcenter_object_by_name(content, vimtype, name):
     objts = get_all_objs(content, [vimtype])
-
     for objt in objts:
         if objt.name == name:
             return objt
-
     return None
 
 def get_resgroup(content, name):
-
+    log("----- Getting Current state -----")
     resgroup = find_vcenter_object_by_name(content, vim.VirtualApp, name)
-
     return resgroup
 
+def get_vapp_data():
+    vapp = vc['oms_vapp']
+    vapp_data = {}
+    vapp_data.update({'id': vapp._moId})
+    vapp_data.update({'name': vapp.name})
+    return vapp_data
 
 def state_delete_vapp(module):
-
+    log("----- Deleting vAPP -----")
     vapp = vc['oms_vapp']
+    vapp_data = get_vapp_data()
 
     power_off = vapp.PowerOffVApp_Task(True)
     wait_for_task(power_off)
@@ -242,16 +289,21 @@ def state_delete_vapp(module):
     delete_vapp = vapp.Destroy_Task()
     changed, result = wait_for_task(delete_vapp)
 
-    module.exit_json(changed=changed, result=result)
-
-
+    module.exit_json(changed=changed, object_id=vapp_data['id'], object_name=vapp_data['name'], msg="STATE DELETE")
 
 def state_exit_unchanged(module):
-    module.exit_json(changed=False, msg="EXIT UNCHANED")
+    vapp_id = None
+    vapp_name = None
 
+    if module.params['state'] != 'absent':
+        vapp_data = get_vapp_data()
+        vapp_id = vapp_data['id']
+        vapp_name = vapp_data['name']
+
+    module.exit_json(changed=False, object_id=vapp_id, object_name=vapp_name, msg="EXIT UNCHANED")
 
 def state_create_vapp(module):
-
+    log("State Create vAPP ...")
     ovftool_exec = '{}/ovftool'.format(module.params['ovftool_path'])
     ova_file = '{}/{}'.format(module.params['path_to_ova'], module.params['ova_file'])
     vi_string = 'vi://{}:{}@{}/{}/host/{}/'.format(module.params['username'],
@@ -270,18 +322,13 @@ def state_create_vapp(module):
                                           '--network={}'.format(module.params['network']),
                                           '--name={}'.format(module.params['vmname']),
                                           '--prop:viouser_passwd={}'.format(module.params['viouser_password']),
-                                          '--prop:vami.domain.management-server={}'.format(
-                                              module.params['oms_hostname']),
+                                          '--prop:vami.domain.management-server={}'.format(module.params['oms_hostname']),
                                           '--prop:vami.ip0.management-server={}'.format(module.params['oms_ip']),
-                                          '--prop:vami.netmask0.management-server={}'.format(
-                                              module.params['oms_subnet']),
-                                          '--prop:vami.gateway.management-server={}'.format(
-                                              module.params['oms_gateway']),
-                                          '--prop:vami.DNS.management-server={},{}'.format(
-                                              module.params['oms_dns_server_ip'][0],
-                                              module.params['oms_dns_server_ip'][1]),
-                                          '--prop:vami.searchpath.management-server={}'.format(
-                                              module.params['oms_search_path']),
+                                          '--prop:vami.netmask0.management-server={}'.format(module.params['oms_subnet']),
+                                          '--prop:vami.gateway.management-server={}'.format(module.params['oms_gateway']),
+                                          '--prop:vami.DNS.management-server={},{}'.format(module.params['oms_dns_server_ip'][0],
+                                                                                           module.params['oms_dns_server_ip'][1]),
+                                          '--prop:vami.searchpath.management-server={}'.format(module.params['oms_search_path']),
                                           '--prop:ntpServer={}'.format(module.params['oms_ntp_server']),
                                           '--prop:syslogServer={}'.format(module.params['oms_syslog_server']),
                                           '--prop:syslogProtocol={}'.format(module.params['oms_syslog_protocol']),
@@ -290,9 +337,10 @@ def state_create_vapp(module):
                                           vi_string])
 
     if ova_tool_result[0] != 0:
-        module.fail_json(msg='Failed to deploy OVA, error message from ovftool is: {}'.format(ova_tool_result[1]))
-
-    module.exit_json(changed=True, result=ova_tool_result[0])
+        msg = 'Failed to deploy OVA, error message from ovftool is: {}'.format(ova_tool_result[1])
+        log(msg)
+        module.fail_json(msg=msg)
+    return ova_tool_result[0]
 
 
 
@@ -354,7 +402,31 @@ def main():
     else:
         current_state = 'absent'
 
+    log("Desired State --> {} Current State --> {}".format(desired_state, current_state))
+
     oms_vapp_states[desired_state][current_state](module)
+
+    oms_mgmt_svr = find_virtual_machine(content, 'management-server')
+
+    if not oms_mgmt_svr:
+        msg = "Failed to find oms management server"
+        log(msg)
+        module.fail_json(msg=msg)
+
+    if not wait_for_vm(oms_mgmt_svr):
+        msg = "Failed waiting to power on management server"
+        log(msg)
+        module.fail_json(msg=msg)
+
+    if not wait_for_api(module):
+        msg = "Failed waiting for OMS api"
+        log(msg)
+        module.fail_json(msg=msg)
+
+    module.exit_json(changed=True,
+                     power_state=True,
+                     api_status=True,
+                     object_id=oms_mgmt_svr._moId)
 
 
 from ansible.module_utils.basic import *

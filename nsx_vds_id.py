@@ -137,7 +137,7 @@ def main():
     argument_spec = dict(
         nsx_manager=dict(type='str', required=True),
         nsx_manager_username=dict(type='str', required=True),
-        nsx_manager_password=dict(type='str', required=True),
+        nsx_manager_password=dict(type='str', required=True, no_log=True),
         nsx_api_version=dict(type='str', default="2.0"),
         vdnscope_name=dict(type='str', required=True),
         ansible_variable_name=dict(type='str'),
@@ -177,5 +177,3 @@ from ansible.module_utils.facts import *
 
 if __name__ == '__main__':
     main()
-
-
