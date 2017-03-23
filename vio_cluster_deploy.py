@@ -494,7 +494,7 @@ def log(message=None):
 
 
 class VioOms(object):
-    """VioOms
+    """VioOms Using the OmsController module to Create and delete vio cluster deployments
     :param module: AnsibleModule
     :param server: oms server
     :param password: oms password
