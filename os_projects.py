@@ -145,7 +145,6 @@ class OpenstackProject(object):
             msg = "Failed to get client: %s " % str(e)
             log(msg)
             self.module.fail_json(msg=msg)
-        log("ks client: %s " % ks)
         return ks
 
     def run_state(self):
@@ -169,7 +168,7 @@ class OpenstackProject(object):
 
         if current_state == 'present' and desired_state == 'absent':
             changed, delete_result = self.state_delete_project(self.project)
-            result = str(delete_result)
+            result = str(delete_result[0])
 
         self.module.exit_json(changed=changed, result=result, project_id=self.project_id)
 
