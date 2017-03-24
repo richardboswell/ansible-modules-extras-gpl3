@@ -102,13 +102,14 @@ class OpenstackProject(object):
         self.module = module
         self.auth_url = module.params['auth_url']
         self.auth_user = module.params['auth_user']
-        self.auth_pass = module.params['auth_pass']
+        self.auth_pass = module.params['auth_password']
         self.auth_project = module.params['auth_project']
         self.auth_project_domain = module.params['auth_project_domain']
         self.auth_user_domain = module.params['auth_user_domain']
-        self.project_name = module.params['new_project_name']
-        self.current_state = None
+        self.new_project_name = module.params['new_project_name']
         self.ks = self.keystone_auth()
+        self.project_name = None
+        self.project_id = None
 
     def _keystone_auth(self):
         log("GETTING KEYSTONE CLIENT....")
@@ -127,14 +128,13 @@ class OpenstackProject(object):
         log("GETTING KEYSTONE CLIENT....")
         ks = None
         try:
-            auth = identity.Password(auth_url=self.auth_url,
-                                     username=self.auth_user,
-                                     password=self.auth_pass,
-                                     project_name=self.auth_project,
-                                     project_domain_id=self.auth_project_domain,
-                                     user_domain_id=self.auth_user_domain)
-            sess = session.Session(auth=auth,
-                                   verify=False)
+            auth = v3.Password(auth_url=self.auth_url,
+                               username=self.auth_user,
+                               password=self.auth_pass,
+                               project_name=self.auth_project,
+                               project_domain_id=self.auth_project_domain,
+                               user_domain_id=self.auth_user_domain)
+            sess = session.Session(auth=auth, verify=False)
             ks = client.Client(session=sess)
         except Exception as e:
             msg = "Failed to get client: %s " % str(e)
@@ -143,75 +143,35 @@ class OpenstackProject(object):
         log("ks client: %s " % ks)
         return ks
 
+    def run_state(self):
+        changed       = False
+        result        = None
+        current_state = self.check_project_state()
+        desired_state = self.module.params['state']
+        module_state  = (self.current_state == desired_state)
+
+        if module_state:
+            msg = "EXIT UNCHANGED"
+            self.state_exit_unchanged(changed=False, msg=msg,
+                                      project_name=self.project_name,
+                                      project_id=self.project_id)
+
+        if current_state == 'absent' and desired_state == 'present':
+            changed, result = self.state_create_project()
+        if current_state == 'present' and desired_state == 'absent':
+            changed, result = self.state_delete_project()
+
+        self.module.exit_json(changed=changed, result=result)
+
     def check_project_state(self):
-        log("Checking State...")
         state = 'absent'
-        projects = [p.name for p in self.ks.tenants.list()]
+        projects = [p for p in self.ks.projects.list()]
+
         if self.project_name in projects:
             state = 'present'
+
         log("Current State--> {}".format(state))
         return state
-
-    def process_state(self):
-        log("Processing State...")
-        self.current_state = self.check_project_state()
-
-        project_states = {
-            'absent': {
-                'present': self.state_delete_project,
-                'absent': self.state_exit_unchanged,
-            },
-            'present': {
-                'present': self.state_exit_unchanged,
-                'absent': self.state_create_project,
-            }
-        }
-
-        project_states[self.module.params['state']][self.current_state]()
-
-
-    def state_create_project(self):
-        log("Create Project...")
-        new_project = None
-        changed = False
-        try:
-            new_project = self.ks.tenants.create(self.project_name)
-            changed = True
-        except Exception as e:
-            msg="Failed to create Project Exception: {}".format(e)
-            log(msg)
-            self.module.fail_json(msg=msg)
-        if not new_project:
-            self.module.fail_json(msg="Failed to create Project")
-        log("NEW PROJECT--> {}".format(new_project))
-        self.module.exit_json(changed=changed, project_name=new_project.name, project_id=new_project.id)
-
-    def state_delete_project(self):
-        log("Deleting Project...")
-        delete_project = None
-        project_name = None
-        project_id = None
-
-        project_to_delete = [t for t in self.ks.tenants.list() if t.name == self.project_name]
-
-        if project_to_delete:
-            project_name = project_to_delete[0].name
-            project_id = project_to_delete[0].id
-            delete_project = self.ks.tenants.delete(project_to_delete[0])
-        log("Deleted Project--> {}".format(project_name))
-        self.module.exit_json(changed=True, project_name=project_name,
-                              project_id=project_id, msg="Delete Project")
-
-    def state_exit_unchanged(self):
-        log("Exiting Unchanged...")
-        if self.module.params['state'] == 'absent' and self.current_state == 'absent':
-            self.module.exit_json(changed=False, msg="EXIT UNCHANGED",
-                                  project_name=None, project_id=None)
-
-        if self.module.params['state'] == 'present' and self.current_state == 'present':
-            project = [p for p in self.ks.tenants.list() if p.name == self.project_name][0]
-            self.module.exit_json(changed=False, msg="EXIT UNCHANGED",
-                                  project_name=project.name, project_id=project.id)
 
 
 
@@ -233,7 +193,7 @@ def main():
         module.fail_json(msg='python-keystone is required for this module')
 
     os = OpenstackProject(module)
-    os.process_state()
+    os.run_state()
 
 
 from ansible.module_utils.basic import *
