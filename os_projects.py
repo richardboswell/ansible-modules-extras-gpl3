@@ -106,9 +106,14 @@ class OpenstackProject(object):
         self.auth_project = module.params['auth_project']
         self.auth_project_domain = module.params['auth_project_domain']
         self.auth_user_domain = module.params['auth_user_domain']
-        self.new_project_name = module.params['new_project_name']
+        self.project_name = module.params['new_project_name']
+        self.project_enabled = module.params['enabled']
+        self.project_desc = module.params['project_description']
+        self.project_domain_id = \
+            module.params['project_domain_id'] if module.params['project_domain_id'] else 'default'
+        self.project_description = \
+            module.params['project_description'] if module.params['project_description'] else 'New Project'
         self.ks = self.keystone_auth()
-        self.project_name = None
         self.project_id = None
 
     def _keystone_auth(self):
@@ -146,6 +151,7 @@ class OpenstackProject(object):
     def run_state(self):
         changed       = False
         result        = None
+
         current_state = self.check_project_state()
         desired_state = self.module.params['state']
         module_state  = (self.current_state == desired_state)
@@ -157,21 +163,46 @@ class OpenstackProject(object):
                                       project_id=self.project_id)
 
         if current_state == 'absent' and desired_state == 'present':
-            changed, result = self.state_create_project()
+            changed, result = self.state_create_project(self.project_name,
+                                                        self.project_enabled,
+                                                        self.project_domain_id,
+                                                        self.project_description)
         if current_state == 'present' and desired_state == 'absent':
             changed, result = self.state_delete_project()
 
         self.module.exit_json(changed=changed, result=result)
 
+    def state_delete_project():
+        pass
+
+
+    def state_create_project(self, _name, _enabled, _domain_id, _description):
+        changed = False
+        project = None
+
+        try:
+            project = self.ks.projects.create(name=_name,
+                                              domain_id=_domain_id,
+                                              description=_description,
+                                              enabled=_enabled)
+            changed = True
+        except Exception as e:
+            msg = "Failed to create project: %s " % str(e)
+            log(msg)
+            self.module.fail_json(msg=msg)
+
+        return changed, project
+
+
     def check_project_state(self):
-        state = 'absent'
-        projects = [p for p in self.ks.projects.list()]
+        project = None
+        try:
+            project = [p for p in self.ks.projects.list() if p.name == self.project_name][0]
+        except IndexError:
+            return 'absent'
+        self.project_id = project.id
 
-        if self.project_name in projects:
-            state = 'present'
-
-        log("Current State--> {}".format(state))
-        return state
+        return 'present'
 
 
 
@@ -184,6 +215,9 @@ def main():
         auth_project_domain=dict(required=True, type='str'),
         auth_user_domain=dict(required=True, type='str'),
         new_project_name=dict(required=True, type='str'),
+        enabled=dict(required=True, type='bool'),
+        project_domain_id=dict(required=False, type='str'),
+        project_description=dict(required=False, type='str'),
         state=dict(default='present', choices=['present', 'absent'], type='str'),
     )
 
