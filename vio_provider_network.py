@@ -20,13 +20,13 @@
 
 
 DOCUMENTATION = '''
-module: vio_create_network
+module: vio_provider_network
 short_description: Create External Floating IP Network for VIO
 description:
     - This module is for creating an external network and a subnet for VIO. Created specifically for creating
       external provider network for VIO Setup to support the provider type and provider physical network.
       Currently only supports create and delete. IP address's are not validated in this module only that the provided
-      gateway and allocation pool ips are within the provided subnet. Intended for use within the chaperone vio role only.
+      gateway and allocation pool ips are within the provided subnet. Intended for use within the chaperone vio role.
 options:
     auth_url:
         description:
@@ -62,7 +62,9 @@ options:
                 - enable port security
                 type: bool
             provider_network_type:
-                - options: portgroup
+                - options:
+                    portgroup
+                    flat
                 type: str
             provider_physical_network:
                 - provide the portgroup moid
@@ -106,6 +108,8 @@ options:
             choices: present, absent
         required: True
 requirements: python-neutron, netaddr
+returns:
+    network id of the create network
 '''
 
 EXAMPLE = '''
@@ -133,7 +137,6 @@ EXAMPLE = '''
       allocation_pools:
         - start: '192.168.0.50'
           end: '192.168.0.100'
-
 '''
 
 
@@ -146,105 +149,76 @@ except ImportError:
 
 
 def state_exit_unchanged(module):
-
     neutron = get_neutron_client(module)
-
     net_id = get_network_id(module, neutron)
-
     module.exit_json(changed=False, net_id=net_id, msg='EXIT UNCHANGED')
 
+def state_exit_unchanged_absent(module):
+    #neutron = get_neutron_client(module)
+    #net_id = get_network_id(module, neutron)
+    module.exit_json(changed=False, net_id=None, msg='EXIT UNCHANGED')
 
 def state_delete_network(module):
     neutron = get_neutron_client(module)
     net_id = get_network_id(module, neutron)
-
     try:
         del_net = neutron.delete_network(net_id)
     except Exception as e:
         module.fail_json(msg="Failed deleting network: {}".format(e))
-
     module.exit_json(changed=True, result=del_net, msg="DELETE NETWORK")
-
 
 def state_update_network(module):
     module.exit_json(changed=False, msg="UPDATE NETWORK - currently not supported")
 
-
 def state_update_subnet(module):
     module.exit_json(changed=False, msg="UPDATE SUBNET - currently not supported")
 
-
 def state_sub_not_present(module):
-
     neutron = get_neutron_client(module)
     net_id = get_network_id(module, neutron)
-
     subnet = create_subnet(module, neutron, net_id)
-
     if subnet:
         module.exit_json(changed=True, result=subnet, msg="Created Subnet")
     else:
         module.fail_json(msg="Failed Creating subnet")
 
-
 def state_create_network(module):
-
     neutron = get_neutron_client(module)
-
     network_id = create_network(module, neutron)
-
     subnet = create_subnet(module, neutron, network_id)
-
     if subnet:
         module.exit_json(changed=True, net_id=network_id, msg="CREATE NETWORK")
     else:
         module.exit_json(changed=False, msg="Failed creating network")
 
-
 def get_neutron_client(module):
-
     try:
-        neutron = neutron_client.Client(
-            username=module.params['username'],
-            password=module.params['password'],
-            tenant_name=module.params['tenant_name'],
-            auth_url=module.params['auth_url'],
-            insecure=True,
-        )
+        neutron = neutron_client.Client(username=module.params['username'],
+                                        password=module.params['password'],
+                                        tenant_name=module.params['tenant_name'],
+                                        auth_url=module.params['auth_url'],
+                                        insecure=True)
     except Exception as e:
         module.fail_json(msg="Failed Authenticating for neutron client: {}".format(e))
-
     return neutron
-
 
 def check_network_present(module, neutron):
     network_name = module.params['network']['name']
-
     network_list = neutron.list_networks()
-
     net_names = [v for i in network_list['networks'] for k, v in i.items() if k == 'name']
-
     if network_name in net_names:
         return True
     else:
         return False
 
-
 def get_network_id(module, neutron):
-
     network_name = module.params['network']['name']
-
     network_list = neutron.list_networks()
-
     net = [i for i in network_list['networks'] for k, v in i.items() if k == 'name' if v == network_name][0]
-
     return net['id']
 
-
 def set_net_params(module):
-
     net = module.params['network']
-
     network_params = {
       'name': net['name'],
       'admin_state_up': net['admin_state_up'],
@@ -254,137 +228,94 @@ def set_net_params(module):
       'router:external': net['router_external'],
       'shared': net['shared']
     }
-
     return network_params
 
-
 def check_network_config(module, neutron):
-
     net_config = set_net_params(module)
     net_name = net_config['name']
-
     network_list = neutron.list_networks()
-
     net = [i for i in network_list['networks'] for k, v in i.items() if k == 'name' if v == net_name][0]
 
     for x in set(net_config).intersection(set(net)):
         if not (net_config[x] == net[x]):
             return False
-
     return True
-
 
 def check_subnet_present(module, neutron):
     subnet_name = module.params['subnet']['name']
-
     subnet_list = neutron.list_subnets()
-
     sub_names = [v for i in subnet_list['subnets'] for k, v in i.items() if k == 'name']
-
     if subnet_name in sub_names:
         return True
     else:
         return False
 
-
-
 def check_subnet_config(module, neutron):
     sub_config = module.params['subnet']
     subnet_name = sub_config['name']
-
     subnets = neutron.list_subnets()
-
     sub = [i for i in subnets['subnets'] for k,v in i.items() if k == 'name' if v == subnet_name][0]
 
     for x in set(sub_config).intersection(set(sub)):
         if not (sub_config[x] == sub[x]):
             return False
-
     return True
-
 
 def create_network(module, neutron):
     net_params = set_net_params(module)
     network_body = {'network': net_params}
-
     try:
         network = neutron.create_network(body=network_body)
     except Exception as e:
         module.fail_json(msg="Failed Creating Network: {}".format(e))
-
     net = network['network']
     net_id = net['id']
-
     return net_id
 
 
 def create_subnet(module, neutron, network_id):
-
     module.params['subnet']['network_id'] = network_id
-
     subnet_params = {'subnets': [module.params['subnet']]}
-
     try:
         subnet = neutron.create_subnet(body=subnet_params)
     except Exception as e:
         module.fail_json(msg="Failed creating network: {}".format(e))
-
     return subnet
-
 
 def check_ips_within_subnet(module):
 
-    ips_to_check = [
-        module.params['subnet']['gateway_ip'],
-        module.params['subnet']['allocation_pools'][0]['start'],
-        module.params['subnet']['allocation_pools'][0]['end']
-    ]
-
+    ips_to_check = [module.params['subnet']['gateway_ip'],
+                    module.params['subnet']['allocation_pools'][0]['start'],
+                    module.params['subnet']['allocation_pools'][0]['end']]
     for ip in ips_to_check:
         if netaddr.IPAddress(ip) not in netaddr.IPNetwork(module.params['subnet']['cidr']):
             return False, ip
-
     return True, None
 
-
 def check_network_state(module):
-
     ip_check, ip = check_ips_within_subnet(module)
     if not ip_check:
         module.fail_json(changed=False, msg="IP: {} is not within subnet specified".format(ip))
-
     neutron = get_neutron_client(module)
-
     net_present = check_network_present(module, neutron)
-
     if not net_present:
         return 'absent'
-
     net_config = check_network_config(module, neutron)
-
     if not net_config:
         return 'update'
-
     subnet_present = check_subnet_present(module, neutron)
-
     if not subnet_present:
         return 'absent_subnet'
-
     subnet_config = check_subnet_config(module, neutron)
-
     if not subnet_config:
         return 'update_subnet'
-
     return 'present'
-
-
-
 
 def main():
     argument_spec = dict(
         auth_url=dict(required=True, type='str'),
         username=dict(required=True, type='str'),
-        password=dict(required=True, type='str'),
+        password=dict(required=True, type='str', no_log=True),
         tenant_name=dict(required=True, type='str'),
         network=dict(required=True, type='dict'),
         subnet=dict(required=True, type='dict'),
@@ -403,7 +334,7 @@ def main():
                 'update_subnet': state_delete_network,
                 'absent_subnet': state_delete_network,
                 'present': state_delete_network,
-                'absent': state_exit_unchanged,
+                'absent': state_exit_unchanged_absent,
             },
             'present': {
                 'update': state_update_network,
