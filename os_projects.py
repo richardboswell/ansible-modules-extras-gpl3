@@ -112,7 +112,7 @@ class OpenstackProject(object):
         self.project_domain_id = \
             module.params['project_domain_id'] if module.params['project_domain_id'] else 'default'
         self.project_description = \
-            module.params['project_description'] if module.params['project_description'] else 'New Project'
+            module.params['project_description'] if module.params['project_description'] else 'New Project: %s' % self.project_name
         self.ks = self.keystone_auth()
         self.project_id = None
 
@@ -151,40 +151,49 @@ class OpenstackProject(object):
     def run_state(self):
         changed       = False
         result        = None
+        msg           = None
 
         current_state = self.check_project_state()
         desired_state = self.module.params['state']
-        module_state  = (self.current_state == desired_state)
+        module_state  = (current_state == desired_state)
 
         if module_state:
-            msg = "EXIT UNCHANGED"
-            self.state_exit_unchanged(changed=False, msg=msg,
-                                      project_name=self.project_name,
-                                      project_id=self.project_id)
+            changed, result = self.state_exit_unchanged()
 
         if current_state == 'absent' and desired_state == 'present':
-            changed, result = self.state_create_project(self.project_name,
-                                                        self.project_enabled,
-                                                        self.project_domain_id,
-                                                        self.project_description)
+            changed, project = self.state_create_project(self.project_name,
+                                                         self.project_domain_id,
+                                                         self.project_description)
+            self.project_id = project.id
+            result = self.project_id
+
         if current_state == 'present' and desired_state == 'absent':
-            changed, result = self.state_delete_project()
+            changed, result = self.state_delete_project(self.project_name)
 
-        self.module.exit_json(changed=changed, result=result)
+        self.module.exit_json(changed=changed, result=result, project_id=self.project_id)
 
-    def state_delete_project():
-        pass
+    def state_exit_unchanged(self):
+        return False, self.project_id
 
+    def state_delete_project(self, project):
+        changed       = False
+        delete_status = None
 
-    def state_create_project(self, _name, _enabled, _domain_id, _description):
+        try:
+            delete_status = self.ks.projects.delete(project)
+            changed = True
+        except Exception as e:
+            msg = "Failed to delete Project: %s " % str(e)
+            log(msg)
+            self.module.fail_json(msg=msg)
+        return changed, delete_status
+
+    def state_create_project(self, _name, _domain_id, _description=None):
         changed = False
         project = None
 
         try:
-            project = self.ks.projects.create(name=_name,
-                                              domain_id=_domain_id,
-                                              description=_description,
-                                              enabled=_enabled)
+            project = self.ks.projects.create(name=_name, _domain_id, _description)
             changed = True
         except Exception as e:
             msg = "Failed to create project: %s " % str(e)
@@ -192,7 +201,6 @@ class OpenstackProject(object):
             self.module.fail_json(msg=msg)
 
         return changed, project
-
 
     def check_project_state(self):
         project = None
