@@ -115,6 +115,7 @@ class OpenstackProject(object):
             module.params['project_description'] if module.params['project_description'] else 'New Project: %s' % self.project_name
         self.ks = self.keystone_auth()
         self.project_id = None
+        self.project = None
 
     def _keystone_auth(self):
         log("GETTING KEYSTONE CLIENT....")
@@ -130,7 +131,6 @@ class OpenstackProject(object):
         return ksclient
 
     def keystone_auth(self):
-        log("GETTING KEYSTONE CLIENT....")
         ks = None
         try:
             auth = v3.Password(auth_url=self.auth_url,
@@ -168,7 +168,8 @@ class OpenstackProject(object):
             result = self.project_id
 
         if current_state == 'present' and desired_state == 'absent':
-            changed, result = self.state_delete_project(self.project_name)
+            changed, delete_result = self.state_delete_project(self.project)
+            result = str(delete_result)
 
         self.module.exit_json(changed=changed, result=result, project_id=self.project_id)
 
@@ -188,12 +189,12 @@ class OpenstackProject(object):
             self.module.fail_json(msg=msg)
         return changed, delete_status
 
-    def state_create_project(self, _name, _domain_id, _description=None):
+    def state_create_project(self, _name, _domain_id, _description):
         changed = False
         project = None
 
         try:
-            project = self.ks.projects.create(name=_name, _domain_id, _description)
+            project = self.ks.projects.create(_name, _domain_id, _description)
             changed = True
         except Exception as e:
             msg = "Failed to create project: %s " % str(e)
@@ -209,6 +210,7 @@ class OpenstackProject(object):
         except IndexError:
             return 'absent'
         self.project_id = project.id
+        self.project = project
 
         return 'present'
 
