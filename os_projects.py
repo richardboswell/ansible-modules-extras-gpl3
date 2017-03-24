@@ -73,7 +73,9 @@ EXAMPLES = '''
 
 
 try:
-    from keystoneclient.v2_0 import client as ks_client
+    from keystoneauth1.identity import v3
+    from keystoneauth1 import session
+    from keystoneclient.v3 import client
     import inspect
     import logging
     HAS_CLIENTS = True
@@ -81,7 +83,7 @@ except ImportError:
     HAS_CLIENTS = False
 
 LOG = logging.getLogger(__name__)
-handler = logging.FileHandler('/var/log/chaperone/chaperone_project_create.log')
+handler = logging.FileHandler('/var/log/chaperone/os_projects.log')
 formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
 handler.setFormatter(formatter)
 LOG.addHandler(handler)
@@ -99,14 +101,16 @@ class OpenstackProject(object):
         super(OpenstackProject, self).__init__()
         self.module = module
         self.auth_url = module.params['auth_url']
-        self.user_name = module.params['username']
-        self.user_pass = module.params['password']
-        self.auth_tenant = module.params['tenant_name']
+        self.auth_user = module.params['auth_user']
+        self.auth_pass = module.params['auth_pass']
+        self.auth_project = module.params['auth_project']
+        self.auth_project_domain = module.params['auth_project_domain']
+        self.auth_user_domain = module.params['auth_user_domain']
         self.project_name = module.params['new_project_name']
         self.current_state = None
         self.ks = self.keystone_auth()
 
-    def keystone_auth(self):
+    def _keystone_auth(self):
         log("GETTING KEYSTONE CLIENT....")
         ksclient = None
         try:
@@ -118,6 +122,26 @@ class OpenstackProject(object):
             log(msg)
             self.module.fail_json(msg=msg)
         return ksclient
+
+    def keystone_auth(self):
+        log("GETTING KEYSTONE CLIENT....")
+        ks = None
+        try:
+            auth = identity.Password(auth_url=self.auth_url,
+                                     username=self.auth_user,
+                                     password=self.auth_pass,
+                                     project_name=self.auth_project,
+                                     project_domain_id=self.auth_project_domain,
+                                     user_domain_id=self.auth_user_domain)
+            sess = session.Session(auth=auth,
+                                   verify=False)
+            ks = client.Client(session=sess)
+        except Exception as e:
+            msg = "Failed to get client: %s " % str(e)
+            log(msg)
+            self.module.fail_json(msg=msg)
+        log("ks client: %s " % ks)
+        return ks
 
     def check_project_state(self):
         log("Checking State...")
@@ -194,9 +218,11 @@ class OpenstackProject(object):
 def main():
     argument_spec = dict(
         auth_url=dict(required=True, type='str'),
-        username=dict(required=True, type='str'),
-        password=dict(required=True, type='str', no_log=True),
-        tenant_name=dict(required=True, type='str'),
+        auth_user=dict(required=True, type='str'),
+        auth_password=dict(required=True, type='str', no_log=True),
+        auth_project=dict(required=True, type='str'),
+        auth_project_domain=dict(required=True, type='str'),
+        auth_user_domain=dict(required=True, type='str'),
         new_project_name=dict(required=True, type='str'),
         state=dict(default='present', choices=['present', 'absent'], type='str'),
     )
