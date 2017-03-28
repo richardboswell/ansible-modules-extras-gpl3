@@ -20,35 +20,61 @@
 
 
 DOCUMENTATION = '''
-module: os_create_project
-short_description: Creates openstack project
+module: os_projects
+short_description: Creates Deletes openstack project
 description:
-    Creates openstack project
+    Creates Deletes openstack project
 requirements:
-    - keystoneclient.v2_0
+    - keystoneauth1
+    - keystoneclient
+    - inspect
+    - logging
     - ansible 2.x
+Tested on:
+    - VIO 3.0 / Openstack Mitaka
 options:
     auth_url:
         description:
             - keystone authentication for the openstack api endpoint
+        example:
+            - https://<endpoint>:5000/v3
         required: True
-    username:
+    auth_user:
         description:
-            - user with rights to create project
+            - User with openstack admin rights usually admin or LDAP/AD admin user
         required: True
-    password:
+    auth_password:
         description:
-            - password for specified user
+            - Users password
         required: True
-    tenant_name:
+    auth_project:
         description:
-            - tenant name with authorization to create project
-        ex: 'admin'
-        required: True
-    new_project_name:
+            - Users project
+    auth_project_domain:
         description:
-            - name of the project to create
+            - Users project domain
         required: True
+    auth_user_domain:
+        description:
+            - Users user domain
+        required: True
+    project_name:
+        description:
+            - Project to create delete
+        required: True
+    enabled:
+        description:
+            - Project enabled, defaults to True
+        required: False
+        type: bool
+    project_domain_id:
+        description:
+            - Domain for the project being deleted created, defaults to 'default'
+        required: False
+    project_description:
+        description:
+            - description for the project
+        required: False
     state:
         description:
             - If should be present or absent
@@ -57,18 +83,17 @@ options:
 '''
 
 EXAMPLES = '''
-- name: Create Demo Project
-  os_create_project:
-    auth_url: 'https://{{ vio_loadbalancer_vip }}:5000/v2.0'
-    username: "{{ authuser }}"
-    password: "{{ authpass }}"
-    tenant_name: 'admin'
-    new_project_name: "{{ vio_val_project_name }}"
+- name: Demo Project
+  os_projects:
+    auth_url: 'https://{{ vio_loadbalancer_vip }}:5000/v3'
+    auth_user: "{{ authuser }}"
+    auth_password: "{{ authpass }}"
+    auth_project: 'admin'
+    auth_project_domain: 'default'
+    auth_user_domain: 'default'
+    project_name: "{{ demo_project_name }}"
+    enabled: True
     state: "{{ desired_state }}"
-  register: os_new_project
-  tags:
-    - validate_openstack
-
 '''
 
 
@@ -106,7 +131,7 @@ class OpenstackProject(object):
         self.auth_project = module.params['auth_project']
         self.auth_project_domain = module.params['auth_project_domain']
         self.auth_user_domain = module.params['auth_user_domain']
-        self.project_name = module.params['new_project_name']
+        self.project_name = module.params['project_name']
         self.project_enabled = module.params['enabled']
         self.project_desc = module.params['project_description']
         self.project_domain_id = \
@@ -116,19 +141,6 @@ class OpenstackProject(object):
         self.ks = self.keystone_auth()
         self.project_id = None
         self.project = None
-
-    def _keystone_auth(self):
-        log("GETTING KEYSTONE CLIENT....")
-        ksclient = None
-        try:
-            ksclient = ks_client.Client(username=self.user_name, password=self.user_pass,
-                                        tenant_name=self.auth_tenant, auth_url=self.auth_url,
-                                        insecure=True)
-        except Exception as e:
-            msg="Failed to get keystone client: {}".format(e)
-            log(msg)
-            self.module.fail_json(msg=msg)
-        return ksclient
 
     def keystone_auth(self):
         ks = None
@@ -223,7 +235,7 @@ def main():
         auth_project=dict(required=True, type='str'),
         auth_project_domain=dict(required=True, type='str'),
         auth_user_domain=dict(required=True, type='str'),
-        new_project_name=dict(required=True, type='str'),
+        project_name=dict(required=True, type='str'),
         enabled=dict(required=True, type='bool'),
         project_domain_id=dict(required=False, type='str'),
         project_description=dict(required=False, type='str'),
