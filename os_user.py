@@ -117,7 +117,7 @@ LOG.setLevel(logging.DEBUG)
 
 def log(message=None):
     func = inspect.currentframe().f_back.f_code
-    msg="Method: {} Line Number: {} Message: {}".format(func.co_name, func.co_firstlineno, message)
+    msg="{} Line Number: {} Message: {}".format(func.co_name, func.co_firstlineno, message)
     LOG.debug(msg)
 
 
@@ -165,44 +165,42 @@ class OpenstackUser(object):
         return ks
 
     def run_state(self):
-        changed   = False
-        user_info = {}
-        msg       = None
+        changed = False
+        result = None
 
-        current_state   = self.check_user_state()
-        desired_state   = self.module.params['state']
-        exit_unchanged  = (current_state == desired_state)
+        current_state = self.check_user_state()
+        desired_state = self.module.params['state']
+        exit_unchanged = (current_state == desired_state)
 
         if exit_unchanged:
-            changed, user_info, msg = self.state_exit_unchanged()
+            changed, result = self.state_exit_unchanged()
 
         if current_state == 'absent' and desired_state == 'present':
             params = self._setup_params()
 
             if not self.user:
                 changed, user = self.state_create_user(**params)
-                user_info.update({'name': user.name})
-                msg = "create user"
+                self.user_id = user.id
+                result = self.user_id
 
             if self.roles:
-                user_info.update({'roles': []})
+                role_result = []
                 for role in self.roles:
                     role_assign = self.user_role(params['name'],
                                                  params['default_project'].name,
                                                  role)
-                    user_info['roles'].append({role: role_assign})
-                changed = True if user_info['roles'] else False
-                msg = "create roles"
+                    role_result.append(role_assign)
+                changed = True
+                result = self.user_id, role_result
 
         if current_state == 'present' and desired_state == 'absent':
             changed, delete_result = self.state_delete_user()
-            user_info.update({'delete_result': str(delete_result[0])})
-            msg = "delete"
+            result = self.user_id
 
-        self.module.exit_json(changed=changed, user_info=user_info, msg=msg)
+        self.module.exit_json(changed=changed, result=result)
 
     def state_exit_unchanged(self):
-        return False, {'user_id': self.user_id}, "Exit Unchanged"
+        return False, self.user_id
 
     def state_delete_user(self):
         changed       = False
@@ -298,21 +296,14 @@ class OpenstackUser(object):
         state = False
 
         user_projects = self.ks.projects.list(user=user)
-        log("User Projects: %s " % user_projects)
 
         if not user_projects:
-            log("check user project state: %s " % state)
             return state
-
         if project in self.ks.projects.list(user=user):
-            log("project in user project list")
             state = True
-        log("state: %s " % state)
         return state
 
     def check_user_roles(self, project, user, roles):
-        """Return a list of roles to grant to user
-        """
         state = []
         user_roles = None
         try:
@@ -333,7 +324,6 @@ class OpenstackUser(object):
         return state
 
     def check_user_state(self):
-        log("--- --- --- ---")
         state = 'absent'
 
         user = self.get_user(self.user_name)
@@ -348,16 +338,14 @@ class OpenstackUser(object):
 
         if self.module.params['default_project']:
             project = self.get_project(self.module.params['default_project'])
-            log("default_project: %s " % project.name)
 
             if not project:
-                msg = "Failed to find project: %s " % self.module.params['default_project']
+                msg = "Failed finding project: %s " % self.module.params['default_project']
                 log(msg)
                 self.module.fail_json(msg=msg)
 
             self.project = project
             user_project_state = self.check_user_project(self.user, project)
-            log("user project state: %s " % user_project_state)
 
             if user_project_state:
                 self.project_member = True
@@ -368,8 +356,6 @@ class OpenstackUser(object):
 
             if roles:
                 self.roles = roles
-
-            log("roles to grant: %s " % self.roles)
 
         if self.user and self.project_member and not self.roles:
             state = 'present'
