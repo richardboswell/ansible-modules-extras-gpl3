@@ -184,14 +184,12 @@ class OpenstackUser(object):
                 result = self.user_id
 
             if self.roles:
-                role_result = []
                 for role in self.roles:
                     role_assign = self.user_role(params['name'],
                                                  params['default_project'].name,
                                                  role)
-                    role_result.append(role_assign)
                 changed = True
-                result = self.user_id, role_result
+                result = self.user_id
 
         if current_state == 'present' and desired_state == 'absent':
             changed, delete_result = self.state_delete_user()
