@@ -74,7 +74,7 @@ except ImportError:
     HAS_CLIENTS = False
 
 LOG = logging.getLogger(__name__)
-handler = logging.FileHandler('/var/log/chaperone/vio_stack_present.log')
+handler = logging.FileHandler('/var/log/chaperone/os_check_heat.log')
 formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
 handler.setFormatter(formatter)
 LOG.addHandler(handler)
@@ -82,7 +82,7 @@ LOG.setLevel(logging.DEBUG)
 
 def log(message=None):
     func = inspect.currentframe().f_back.f_code
-    msg="Method: {} Line Number: {} Message: {}".format(func.co_name, func.co_firstlineno, message)
+    msg="{} Line: {} Msg: {}".format(func.co_name, func.co_firstlineno, message)
     LOG.debug(msg)
 
 
