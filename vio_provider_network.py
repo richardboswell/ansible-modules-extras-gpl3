@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# coding=utf-8
 #
 # (c) 2015, Joseph Callen <jcallen () csc.com>
 # Portions Copyright (c) 2015 VMware, Inc. All rights reserved.
@@ -18,101 +19,116 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 module: vio_provider_network
 short_description: Create External Floating IP Network for VIO
 description:
-    - This module is for creating an external network and a subnet for VIO. Created specifically for creating
-      external provider network for VIO Setup to support the provider type and provider physical network.
-      Currently only supports create and delete. IP address's are not validated in this module only that the provided
-      gateway and allocation pool ips are within the provided subnet. Intended for use within the chaperone vio role.
+  This module is for creating an external network and a subnet for VIO. Created specifically for creating
+  external provider network for VIO Setup to support the provider type and provider physical network.
+  Currently only supports create and delete. IP address's are not validated in this module only that the provided
+  gateway and allocation pool ips are within the provided subnet. Intended for use within the chaperone vio role.
+author: VMware
+requirements:
+  - netaddr
+  - neutronclient
 options:
     auth_url:
         description:
-            - keystone authentication url
+          keystone authentication url
         required: True
         type: str
     username:
         description:
-            - username for the admin user for the admin project.
+          username for the admin user for the admin project.
         required: True
         type: str
     password:
         description:
-            - password for the admin user for the amdin project
+          password for the admin user for the amdin project
         required: True
         type: str
     tenant_name:
         description:
-            - tenant name for the admin tenant
+          tenant name for the admin tenant
         required: True
         type: str
     network:
         description:
-            - dictionary containing the network properties
-
-            name:
-                - name the network, should be descriptive ex: external_network
-                type: str
-            admin_state_up:
-                - set admin state
-                type: bool
-            port_security_enabled:
-                - enable port security
-                type: bool
-            provider_network_type:
-                - options:
-                    portgroup
-                    flat
-                type: str
-            provider_physical_network:
-                - provide the portgroup moid
-                type: str
-            router_external:
-                - set router external setting
-                type: bool
-            shared:
-                - set shared
-                type: bool
-
+          dictionary containing the network properties
+        options:
+          name:
+             description:
+               name the network, should be descriptive ex: external_network
+             type: str
+          admin_state_up:
+             description:
+               set admin state
+             type: bool
+          port_security_enabled:
+             description:
+               enable port security
+             type: bool
+          provider_network_type:
+             descriptions:
+               type of network 
+             choices: [portgroup, flat]
+             type: str
+          provider_physical_network:
+            description:
+              provide the portgroup moid
+            type: str
+          router_external:
+            description:
+              set router external setting
+            type: bool
+          shared:
+            description:
+              set shared
+            type: bool
         required: True
-
     subnet:
         description:
-            - dictionary containing the subnet properties
-            name:
-                - name the subnet for the external network
-                type: str
-            enable_dhcp:
-                - enable dhcp
-                type: bool
-            gateway_ip:
-                - the gateway ip address of the subnet
-                type: str
-            ip_version:
-                - ip version for the network
-                type: int
-            cidr:
-                - valid network in cidr notation
-                type: str
-            allocation_pools:
-                - starting and ending ip allowation pool. this is the pool of ips that will be used as floating ips
-                for instances and routers needing a floating ip. Make sure to make the range to meet expected capacity.
-                type: list
-
+          dictionary containing the subnet properties
+        options:
+          name:
+            description:
+              name the subnet for the external network
+            type: str
+          enable_dhcp:
+            description:
+              enable dhcp
+            type: bool
+          gateway_ip:
+            description:
+              the gateway ip address of the subnet
+            type: str
+          ip_version:
+            description:
+              ip version for the network
+            type: int
+          cidr:
+            description:
+              valid network in cidr notation
+            type: str
+          allocation_pools:
+            description:
+              starting and ending ip allowation pool. this is the pool of ips that will be used as floating ips
+              for instances and routers needing a floating ip. Make sure to make the range to meet expected capacity.
+            type: list
         required: True
     state:
         description:
-            - desired state
-            choices: present, absent
+            desired state
+        choices: [present, absent]
         required: True
-requirements: python-neutron, netaddr
-returns:
-    network id of the create network
 '''
 
-EXAMPLE = '''
+EXAMPLES = '''
 - name: Create Openstack network and subnet
   vio_create_network:
     auth_url: 'https://localhost:5000/v2.0
@@ -139,6 +155,12 @@ EXAMPLE = '''
           end: '192.168.0.100'
 '''
 
+RETURN = '''
+net_id:
+  description: id for the network
+  type: str
+  sample: uuid
+'''
 
 try:
     from neutronclient.v2_0 import client as neutron_client

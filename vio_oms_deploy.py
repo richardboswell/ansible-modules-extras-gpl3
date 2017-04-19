@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python
 # coding=utf-8
 #
 # (c) 2015, Joseph Callen <jcallen () csc.com>
@@ -18,6 +18,10 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
 
 DOCUMENTATION = '''
 module: vio_oms_deploy
@@ -138,7 +142,7 @@ options:
 
 '''
 
-EXAMPLE = '''
+EXAMPLES = '''
 - name: Deploy OMS vAPP
   vio_oms_deploy:
     hostname: "{{ vio_oms_vcenter_hostname }}"
@@ -171,28 +175,28 @@ EXAMPLE = '''
     - deploy_vio_ova
 '''
 
+RETURN = '''
+power_state:
+  description: 
+    state of the vapp power
+  type: bool
+api_status:
+  description:
+    api status of vapp
+  type: bool
+object_id:
+  description:
+    moId id for the vapp
+  type: str
+'''
 
 try:
     import time
     import requests
-    import inspect
-    import logging
     from pyVmomi import vim, vmodl
     IMPORTS = True
 except ImportError:
     IMPORTS = False
-
-LOG = logging.getLogger(__name__)
-handler = logging.FileHandler('/var/log/chaperone/vio_oms_deploy.log')
-formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-handler.setFormatter(formatter)
-LOG.addHandler(handler)
-LOG.setLevel(logging.DEBUG)
-
-def log(message=None):
-    func = inspect.currentframe().f_back.f_code
-    msg = "Method: {} Line Number: {} Message: {}".format(func.co_name, func.co_firstlineno, message)
-    LOG.debug(msg)
 
 vc = {}
 
@@ -207,7 +211,6 @@ def check_oms_api(module):
 def wait_for_api(module, sleep_time=15):
     status_poll_count = 0
     while status_poll_count < 30:
-        log("----- Waiting for API Status -----> {}".format(status_poll_count))
         api_status = check_oms_api(module)
         if api_status:
             if api_status[0] == 200:
@@ -227,11 +230,9 @@ def wait_for_vm(vm, sleep_time=15):
     while vm_pool_count < 30:
 
         connected = (vm.runtime.connectionState == 'connected')
-        log("Waiting for vm Connected --> {}".format(connected))
 
         if connected:
             powered_on = (vm.runtime.powerState == 'poweredOn')
-            log("Waiting for vm Powered On --> {}".format(powered_on))
 
             if powered_on:
                 return True
@@ -267,7 +268,6 @@ def find_vcenter_object_by_name(content, vimtype, name):
     return None
 
 def get_resgroup(content, name):
-    log("----- Getting Current state -----")
     resgroup = find_vcenter_object_by_name(content, vim.VirtualApp, name)
     return resgroup
 
@@ -279,7 +279,6 @@ def get_vapp_data():
     return vapp_data
 
 def state_delete_vapp(module):
-    log("----- Deleting vAPP -----")
     vapp = vc['oms_vapp']
     vapp_data = get_vapp_data()
 
@@ -303,7 +302,6 @@ def state_exit_unchanged(module):
     module.exit_json(changed=False, object_id=vapp_id, object_name=vapp_name, msg="EXIT UNCHANED")
 
 def state_create_vapp(module):
-    log("State Create vAPP ...")
     ovftool_exec = '{}/ovftool'.format(module.params['ovftool_path'])
     ova_file = '{}/{}'.format(module.params['path_to_ova'], module.params['ova_file'])
     vi_string = 'vi://{}:{}@{}/{}/host/{}/'.format(module.params['username'],
@@ -338,7 +336,6 @@ def state_create_vapp(module):
 
     if ova_tool_result[0] != 0:
         msg = 'Failed to deploy OVA, error message from ovftool is: {}'.format(ova_tool_result[1])
-        log(msg)
         module.fail_json(msg=msg)
     return ova_tool_result[0]
 
@@ -402,25 +399,20 @@ def main():
     else:
         current_state = 'absent'
 
-    log("Desired State --> {} Current State --> {}".format(desired_state, current_state))
-
     oms_vapp_states[desired_state][current_state](module)
 
     oms_mgmt_svr = find_virtual_machine(content, 'management-server')
 
     if not oms_mgmt_svr:
         msg = "Failed to find oms management server"
-        log(msg)
         module.fail_json(msg=msg)
 
     if not wait_for_vm(oms_mgmt_svr):
         msg = "Failed waiting to power on management server"
-        log(msg)
         module.fail_json(msg=msg)
 
     if not wait_for_api(module):
         msg = "Failed waiting for OMS api"
-        log(msg)
         module.fail_json(msg=msg)
 
     module.exit_json(changed=True,

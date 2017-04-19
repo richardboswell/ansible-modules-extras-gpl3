@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# coding=utf-8
 #
 # (c) 2015, Joseph Callen <jcallen () csc.com>
 # Portions Copyright (c) 2015 VMware, Inc. All rights reserved.
@@ -18,11 +19,13 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-#### Module WIP ####
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
 
 DOCUMENTATION = '''
 module: vcenter_vrops_config
-Short_description: Configuration for vROPs
+Short_description: Configuration for vROPs Module is currently WIP!!!!
 description:
     Configuration for vROPs. Consumes internal vrops casa api.
 requirements:
@@ -33,6 +36,7 @@ Tested on:
     - esx 6
     - ansible 2.1.2
     - vRealize-Operations-Manager-Appliance-6.4.0.4635874
+author: VMware
 options:
     hostname:
         description:
@@ -48,8 +52,6 @@ options:
             - The password of the vSphere vCenter user
         required: True
         aliases: ['pass', 'pwd']
-
-
     state:
         description:
             - Desired state of the disk group
@@ -57,7 +59,7 @@ options:
         required: True
 '''
 
-EXAMPLE = '''
+EXAMPLES = '''
 - name: vROPs Configure
   vcenter_vrops_config:
     administrator: 'admin'
@@ -68,28 +70,20 @@ EXAMPLE = '''
     - vrops_config
 '''
 
+RETURN = '''
+description: Module currently in WIP
+returned: 
+type: 
+sample: 
+'''
 
 try:
     import time
     import requests
-    import inspect
-    import logging
     IMPORTS = True
 except ImportError:
     IMPORTS = False
 
-## Logging
-LOG = logging.getLogger(__name__)
-handler = logging.FileHandler('/var/log/chaperone/vcenter_vrops_config.log')
-formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-handler.setFormatter(formatter)
-LOG.addHandler(handler)
-LOG.setLevel(logging.DEBUG)
-
-def log(message=None):
-    func = inspect.currentframe().f_back.f_code
-    msg="{} Line: {} Msg: {}".format(func.co_name, func.co_firstlineno, message)
-    LOG.debug(msg)
 
 ## vrops api paths this needs fixings
 _security         = 'security/%s'
@@ -130,7 +124,8 @@ class VropsRestClientExceptions(Exception):
 
 
 class VropsRestClient(object):
-    """"""
+    """ A basic vROPs rest client to configure the appliance
+    """
     def __init__(self, username, password, server):
         super(VropsRestClient, self).__init__()
         self._username       = username
@@ -151,8 +146,6 @@ class VropsRestClient(object):
         resp  = None
         content = None
         status_code = None
-
-        log("REQ: %s URL: %s" % (request_type, params['url']))
 
         try:
             if request_type == 'get':
@@ -178,8 +171,6 @@ class VropsRestClient(object):
             msg = "Status Code: %s UNAUTHORIZED" % status_code
             raise VropsRestClientExceptions(msg=msg)
 
-        log("REQ: %s URL: %s STATUS: %s" % (request_type, params['url'], status_code))
-
         try:
             content = resp.json()
         except Exception as e:
@@ -202,7 +193,6 @@ class VropsRestClient(object):
 
         state, content = self.do_request('get', [200], params)
 
-        log("API State: %s " % state)
         return state
 
     def body_to_json(self, body):
@@ -211,7 +201,6 @@ class VropsRestClient(object):
         try:
             json_body = json.dumps(body)
         except Exception as e:
-            log("Failed to convert to json: %s " % str(e))
             return json_body
 
         return json_body
@@ -270,12 +259,10 @@ class VropsRestClient(object):
         url    = self.api_url('admin', path)
         body   = self.ntp_body(ntp_servers)
         _body  = self.body_to_json(body)
-        log("Set NTP Request body: %s " % _body)
         params = {'url': url, 'auth': self.auth, 'data': _body,
                   'headers': _headers, 'verify': False}
 
         state, content = self.do_request('post', [200], params)
-        log("Set NTP content: %s " % content)
 
         return state
 
@@ -334,7 +321,6 @@ class VropsRestClient(object):
         if status_code:
             state = content['configurationRunning']
 
-        log("Admin Role State: %s " % state)
         return state
 
     def admin_role_body(self, _admin_role_body):
@@ -390,7 +376,6 @@ class VropsRestClient(object):
                     'headers': _headers, 'data': _body}
 
         status_code, content = self.do_request('put', [200], params)
-        log("configure cluster content: %s " % content)
         return state
 
     def configure_cluster_name(self, cluster_name):
@@ -419,13 +404,11 @@ class VropsRestClient(object):
         _url   = self._base_admin_url % (self._server, path)
         body   = {'slice_name': self._server }
         _body  = self.body_to_json(body)
-        log("configure slice request body: %s " % _body)
 
         params = {'url': _url, 'verify': False, 'data': _body,
                   'auth': self.auth, 'headers': _headers}
 
         status_code, content = self.do_request('put', [200], params)
-        log("slice configure content: %s " % content)
 
         state = self.slice_state_name()
 
@@ -456,7 +439,6 @@ class VropsConfig(object):
         :param msg: defaults to None
         """
         if not msg: msg = "General Error occured"
-        log(msg)
         self.module.fail_json(msg=msg)
 
     def state_exit_unchanged(self):
@@ -480,36 +462,26 @@ class VropsConfig(object):
         result = None
         msg = "STATE CREATE"
 
-        log("Getting API State... ")
         api_state = self.vrops_client.api_state()
 
         if not api_state:
             msg = "API should be ready but is not"
-            log(msg)
             self._fail(msg)
 
         if self.module.params['set_admin_pass']:
-            log("Setting Admin Init Pass... ")
             admin_password_state = self.vrops_client.set_admin_init_password()
 
         if 'ntp_servers' in self.module.params:
-            log("Setting NTP Servers....")
             _ntp_state = self.vrops_client.configure_ntp(self._ntp_servers)
 
-        log("Setting Admin Role... ")
-        admin_role = self.vrops_client.admin_role()
-
-        log("Setting Cluster Name... ")
+        admin_role    = self.vrops_client.admin_role()
         cluster_name  = self.vrops_client.configure_cluster_name(self.module.params['cluster_name'])
-
-        log("Setting Slice Name...")
         slice_name    = self.vrops_client.configure_slice_name()
 
         return changed, result, msg
 
     def run_state(self):
         """Exit AnsibleModule after running state"""
-        log(" --- --- --- --- --- ")
         changed = False
         result = None
         msg = None

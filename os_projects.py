@@ -18,6 +18,9 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
 
 DOCUMENTATION = '''
 module: os_projects
@@ -32,6 +35,7 @@ requirements:
     - ansible 2.x
 Tested on:
     - VIO 3.0 / Openstack Mitaka
+author: VMware
 options:
     auth_url:
         description:
@@ -96,28 +100,20 @@ EXAMPLES = '''
     state: "{{ desired_state }}"
 '''
 
+RETURN = '''
+description: Returns the project id 
+returned: project_id
+type: str
+sample: uuid
+'''
 
 try:
     from keystoneauth1.identity import v3
     from keystoneauth1 import session
     from keystoneclient.v3 import client
-    import inspect
-    import logging
     HAS_CLIENTS = True
 except ImportError:
     HAS_CLIENTS = False
-
-LOG = logging.getLogger(__name__)
-handler = logging.FileHandler('/var/log/chaperone/os_projects.log')
-formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-handler.setFormatter(formatter)
-LOG.addHandler(handler)
-LOG.setLevel(logging.DEBUG)
-
-def log(message=None):
-    func = inspect.currentframe().f_back.f_code
-    msg="Method: {} Line Number: {} Message: {}".format(func.co_name, func.co_firstlineno, message)
-    LOG.debug(msg)
 
 
 class OpenstackProject(object):
@@ -155,7 +151,6 @@ class OpenstackProject(object):
             ks = client.Client(session=sess)
         except Exception as e:
             msg = "Failed to get client: %s " % str(e)
-            log(msg)
             self.module.fail_json(msg=msg)
         return ks
 
@@ -196,7 +191,6 @@ class OpenstackProject(object):
             changed = True
         except Exception as e:
             msg = "Failed to delete Project: %s " % str(e)
-            log(msg)
             self.module.fail_json(msg=msg)
         return changed, delete_status
 
@@ -209,7 +203,6 @@ class OpenstackProject(object):
             changed = True
         except Exception as e:
             msg = "Failed to create project: %s " % str(e)
-            log(msg)
             self.module.fail_json(msg=msg)
 
         return changed, project

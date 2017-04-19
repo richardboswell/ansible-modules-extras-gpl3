@@ -18,6 +18,10 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
+ANSIBLE_METADATA = {'metadata_version': '1.0',
+                    'status': ['preview'],
+                    'supported_by': 'community'}
+
 
 DOCUMENTATION = '''
 module: vcenter_vrops_deploy
@@ -28,6 +32,8 @@ description:
 requirements:
     - pyvmomi 6
     - ansible 2.x
+    - requests
+    - time
 Tested on:
     - vcenter 6.0
     - pyvmomi 6
@@ -94,7 +100,7 @@ options:
         required: True
 '''
 
-EXAMPLE = '''
+EXAMPLES = '''
 - name: vROPs ova
   vcenter_vrops_deploy:
     hostname: "{{ vcenter }}"
@@ -121,29 +127,21 @@ EXAMPLE = '''
     - deploy_vrops_ova
 '''
 
+RETURN = '''
+description: 
+returned: 
+type: 
+sample: 
+'''
 
 try:
     import time
     import requests
-    import inspect
-    import logging
     from pyVmomi import vim, vmodl
     IMPORTS = True
 except ImportError:
     IMPORTS = False
 
-## Logging
-LOG = logging.getLogger(__name__)
-handler = logging.FileHandler('/var/log/chaperone/vcenter_vrops_deploy.log')
-formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-handler.setFormatter(formatter)
-LOG.addHandler(handler)
-LOG.setLevel(logging.DEBUG)
-
-def log(message=None):
-    func = inspect.currentframe().f_back.f_code
-    msg="Method: {} Line Number: {} Message: {}".format(func.co_name, func.co_firstlineno, message)
-    LOG.debug(msg)
 
 class VropsDeploy(object):
     """Create Read and Delete vrops ova
@@ -175,7 +173,6 @@ class VropsDeploy(object):
         :param msg: defaults to None
         """
         if not msg: msg = "General Error occured"
-        log(msg)
         self.module.fail_json(msg=msg)
 
     def state_exit_unchanged(self):
@@ -218,25 +215,21 @@ class VropsDeploy(object):
 
         if not self.power_state_wait(self.vm):
             msg = "Failed to wait for power on"
-            log(msg)
             return changed, result, msg
 
         if not self.wait_for_api():
             msg = "Failed waiting on api"
-            log(msg)
             return changed, result, msg
 
         return True, result, msg
 
     def run_state(self):
         """Exit AnsibleModule after running state"""
-        log(" --- --- --- --- --- ")
         changed = False
         result = None
         msg = None
 
         desired_state = self.module.params['state']
-        log("Desired State: {}".format(desired_state))
 
         current_state = self.check_state()
         module_state = (desired_state == current_state)
@@ -263,9 +256,6 @@ class VropsDeploy(object):
         vi_string = 'vi://{}:{}@{}/{}/host/{}/'.format(self.module.params['username'],
                                                        self.module.params['password'], self.module.params['hostname'],
                                                        self.datacenter_name, self.cluster_name)
-        log("Ovftool exec: {}".format(ovftool_exec))
-        log("Ova File: {}".format(ova_file))
-        log("VI String: {}".format(vi_string))
 
         ova_tool_result = self.module.run_command([ovftool_exec,
                                                   '--acceptAllEulas',
@@ -293,20 +283,16 @@ class VropsDeploy(object):
         if ova_tool_result[0] != 0:
             self.module.fail_json(msg='Failed to deploy OVA, error message from ovftool is: {}'.format(ova_tool_result[1]))
 
-        log("OVF Tool Result: {}".format(ova_tool_result[0]))
         return ova_tool_result[0]
 
     def power_state_wait(self, vm, sleep_time=15):
         vm_pool_count = 0
         while vm_pool_count < 30:
-            log("Waiting For VM to Power On iteration: {}".format(vm_pool_count))
 
             connected = (vm.runtime.connectionState == 'connected')
-            log("VM connected: {}".format(connected))
 
             if connected:
                 powered_on = (vm.runtime.powerState == 'poweredOn')
-                log("VM Power state: {}".format(powered_on))
 
                 if powered_on:
                     return True
@@ -321,7 +307,6 @@ class VropsDeploy(object):
 
     def check_api(self):
         url = "https://{}".format(self.module.params['ip_address'])
-        log("url: {}".format(url))
         header = {'Content-Type': 'application/json'}
 
         try:
@@ -329,13 +314,11 @@ class VropsDeploy(object):
         except requests.exceptions.ConnectionError:
             return False
 
-        log("Status code: {}".format(resp.status_code))
         return resp.status_code
 
     def wait_for_api(self, sleep_time=15):
         status_poll_count = 0
         while status_poll_count < 30:
-            log("Waiting for api iteration: {}".format(status_poll_count))
 
             api_status = self.check_api()
 
@@ -358,27 +341,21 @@ class VropsDeploy(object):
         datacenter = find_datacenter_by_name(self.si, self.datacenter_name)
 
         if not datacenter:
-            log("Vcenter Object State: {}".format(state))
             return state
-
-        log("Found Datacenter: {}".format(datacenter.name))
 
         cluster   = None
         datastore = None
 
         try:
             cluster = [c for c in datacenter.hostFolder.childEntity if c.name == self.cluster_name][0]
-            log("Found Child Cluster: {}".format(cluster.name))
         except IndexError:
             return state
 
         try:
             datastore = [d for d in cluster.datastore if d.name == self.datastore_name][0]
-            log("Found Child Datastore: {}".format(datastore.name))
         except IndexError:
             return state
 
-        log("Vcenter Object State: {}".format(True))
         return True
 
     def check_state(self):
@@ -395,7 +372,6 @@ class VropsDeploy(object):
         if self.vm:
             state = 'present'
 
-        log("Current State: {}".format(state))
         return state
 
 

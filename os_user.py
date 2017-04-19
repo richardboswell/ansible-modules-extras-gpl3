@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# coding=utf-8
 #
 # (c) 2015, Joseph Callen <jcallen () csc.com>
 # Portions Copyright (c) 2015 VMware, Inc. All rights reserved.
@@ -18,14 +19,18 @@
 # You should have received a copy of the GNU General Public License
 # along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
 
-#todo add revoke from list
 
 DOCUMENTATION = '''
 module: os_user
-short_description:
+short_description: Creates and deletes a user adding user as specified roles to project
 description:
+  Creates and deletes a user adding user as specified roles to project. 
 requirements:
     - ansible 2.x
+    - keystoneauth1
+    - keystoneclient
+author: VMware
+version_added: 2.1
 options:
     auth_url:
         description:
@@ -71,8 +76,21 @@ options:
         choices: ['present', 'absent']
         required: True
     required_together:
-        - ['domain', 'default_project']
-        - ['default_project', 'roles']
+        domain:
+          description:
+            domain for user
+          required: true
+          type: str
+        default_project:
+          description:
+            default project for user
+          required: true
+          type: str
+        roles:
+          description:
+            list of roles for the user
+          type: list
+          required: true
 '''
 
 EXAMPLES = '''
@@ -97,29 +115,21 @@ EXAMPLES = '''
     - quick_val
 '''
 
+RETURN = '''
+description: Returns the user id
+returned: result
+type: str
+sample: uuid
+'''
 
 try:
     from keystoneauth1.identity import v3
     from keystoneauth1 import session
     from keystoneauth1 import exceptions as key_auth1_exceptions
     from keystoneclient.v3 import client
-    import inspect
-    import logging
     HAS_CLIENTS = True
 except ImportError:
     HAS_CLIENTS = False
-
-LOG = logging.getLogger(__name__)
-handler = logging.FileHandler('/var/log/chaperone/os_user.log')
-formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-handler.setFormatter(formatter)
-LOG.addHandler(handler)
-LOG.setLevel(logging.DEBUG)
-
-def log(message=None):
-    func = inspect.currentframe().f_back.f_code
-    msg="{} Line Number: {} Message: {}".format(func.co_name, func.co_firstlineno, message)
-    LOG.debug(msg)
 
 
 member_roles = ['_member_',
@@ -161,7 +171,6 @@ class OpenstackUser(object):
             ks = client.Client(session=sess)
         except Exception as e:
             msg = "Failed to get client: %s " % str(e)
-            log(msg)
             self.module.fail_json(msg=msg)
         return ks
 
@@ -210,7 +219,6 @@ class OpenstackUser(object):
             changed = True
         except Exception as e:
             msg = "Failed to delete User: %s " % str(e)
-            log(msg)
             self.module.fail_json(msg=msg)
         return changed, delete_status
 
@@ -245,7 +253,6 @@ class OpenstackUser(object):
             changed = True
         except Exception as e:
             msg = "Failed to create user: %s " % str(e)
-            log(msg)
             self.module.fail_json(msg=msg)
 
         return changed, user
@@ -278,7 +285,6 @@ class OpenstackUser(object):
                                             project=_project)
         except Exception as e:
             msg = "Failed to grant role: %s " % str(e)
-            log(msg)
             self.module.fail_json(msg=msg)
 
         return grant_role
@@ -308,7 +314,6 @@ class OpenstackUser(object):
         try:
             user_roles = self.ks.roles.list(user=user, project=project)
         except Exception as e:
-            log("failed getting user roles: %s " % str(e))
             return False
 
         if not user_roles:
@@ -340,7 +345,6 @@ class OpenstackUser(object):
 
             if not project:
                 msg = "Failed finding project: %s " % self.module.params['default_project']
-                log(msg)
                 self.module.fail_json(msg=msg)
 
             self.project = project
