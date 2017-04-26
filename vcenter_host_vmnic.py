@@ -67,8 +67,6 @@ host_vmnics:
 
 try:
     from pyVmomi import vim, vmodl
-    import logging
-    import inspect
     HAS_PYVMOMI = True
 except ImportError:
     HAS_PYVMOMI = False
@@ -76,7 +74,7 @@ except ImportError:
 
 class VcenterHostVmnics(object):
     """
-    Obtains the available vmnics for the specified esx host
+    Obtains the available/used vmnics for the specified esx host
     :param module AnsibleModule
     :param esxi_hostname
     :param vcapi
