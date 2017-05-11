@@ -100,22 +100,24 @@ class VcenterHostNtp(object):
 
     def process_state(self):
 
-        states = {
-            'absent': {
-                'absent': self.state_exit_unchanged,
-                'present': self.state_delete,
-            },
-            'present': {
-                'absent': self.state_create,
-                'present': self.state_exit_unchanged,
-                'update': self.state_update,
-            }
-        }
-
         desired_state = self.module.params['state']
         current_state = self.current_state()
+        module_state  = (desired_state == current_state)
 
-        states[desired_state][current_state]()
+        if module_state:
+            self.state_exit_unchanged()
+
+        if desired_state == 'absent' and current_state == 'present':
+            self.state_delete()
+
+        if desired_state == 'present' and current_state == 'absent':
+            self.state_create()
+
+        if desired_state == 'present' and current_state == 'update':
+            self.state_update()
+
+        self.module.exit_json(changed=False, result=None)
+
 
     def ntp_spec(self):
         ntp_config_spec = vim.host.NtpConfig()
