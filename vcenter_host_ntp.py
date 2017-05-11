@@ -24,15 +24,15 @@ ANSIBLE_METADATA = {'metadata_version': '1.0',
 
 DOCUMENTATION = '''
 module: vcenter_host_ntp
-Short_description: sets ntp setting for esx host
+Short_description: sets ntp setting for esx hosts in a cluster
 description:
-    sets ntp setting for esx host
+    sets ntp setting for esx hosts in a cluster
 requirements:
     - pyvmomi 6
     - ansible 2.x
 Tested on:
     - vcenter 6.0
-    - pyvmomi 6
+    - pyvmomi 6.5
     - esx 6
     - ansible 2.1.2
 options:
@@ -78,6 +78,13 @@ EXAMPLES = '''
   tags: workflow_tag
 '''
 
+RETURN = '''
+host_results:
+  description: List of dicts for hosts changed
+  returned: host_results
+  type: list
+  sample: "{'name': str, 'host_ntp_server_changed': bool, 'restart_ntp': bool}"
+'''
 
 try:
     from pyVmomi import vim, vmodl
@@ -98,7 +105,7 @@ class VcenterHostNtp(object):
         self.host_update_list = []
         self.content = connect_to_api(module)
 
-    def process_state(self):
+    def run_state(self):
 
         desired_state = self.module.params['state']
         current_state = self.current_state()
@@ -301,7 +308,7 @@ def main():
         module.fail_json(msg='pyvmomi is required for this module')
 
     hostntp = VcenterHostNtp(module)
-    hostntp.process_state()
+    hostntp.run_state()
 
 from ansible.module_utils.basic import *
 from ansible.module_utils.vmware import *
