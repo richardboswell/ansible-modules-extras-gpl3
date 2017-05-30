@@ -86,11 +86,7 @@ options:
 EXAMPLE = '''
 - name: Add NFS DS to Host
   ignore_errors: no
-  vcenter_add_nfs_ds:
-    host: "{{ vcenter_host }}"
-    login: "{{ vcenter_user }}"
-    password: "{{ vcenter_password }}"
-    port: "{{ vcenter_port }}"
+  vcenter_nfs_ds:
     esxi_hostname: '192.168.1.102'
     nfs_host: '192.168.1.145'
     nfs_path: '/nfs1'
